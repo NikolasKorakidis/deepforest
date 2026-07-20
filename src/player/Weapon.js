@@ -25,10 +25,10 @@ const CLIPS = {
 // distance from the camera — scaled down and positioned empirically for a
 // comfortable lower-right FPS frame. A different offset is used while
 // aiming down sights (arms move it up toward center to look through the
-// scope).
+// scope). See the bottom of this file for what each number controls.
 const MODEL_SCALE = 0.42;
-const HIP_POS = new THREE.Vector3(0.15, -0.17, -0.68);
-const AIM_POS = new THREE.Vector3(-0.04, -0.06, -0.55);
+const HIP_POS = new THREE.Vector3(0.1, -0.15, -0.42);
+const AIM_POS = new THREE.Vector3(0, -0.05, -0.3);
 
 export class Weapon {
   constructor({ camera, input, controller, hud, sfx, getTargets }) {
@@ -80,12 +80,19 @@ export class Weapon {
         const model = cloneSkinned(gltf.scene);
         // The source rig is left-handed (left hand on the trigger, right on
         // the forestock) — mirror on X to get the standard right-handed
-        // grip our camera framing expects. It's also authored with the
-        // barrel pointing along local +X rather than our camera's forward
-        // -Z, so a 90° yaw brings the muzzle around to point into the
-        // world instead of back at the player.
+        // grip our camera framing expects. Separately, the raw mesh's
+        // muzzle sits at local +Z (verified via proper skin-weighted
+        // vertex transforms — the mesh is skinned, so its node's own
+        // transform alone doesn't give the true bind-pose position), i.e.
+        // pointing back at the camera (-Z is forward), so a 180° yaw is
+        // needed to bring it around. (A 90° yaw points the muzzle
+        // sideways instead — it swaps local X and Z rather than flipping
+        // Z, a materially different, wrong fix — don't reintroduce it.)
+        // Combined, X-mirror + 180° yaw nets out to a single Z-axis
+        // mirror: X keeps its sign, Z flips — still one reflection (fixes
+        // handedness) that also correctly reorients the barrel.
         model.scale.set(-MODEL_SCALE, MODEL_SCALE, MODEL_SCALE);
-        model.rotation.y = Math.PI / 2;
+        model.rotation.y = Math.PI;
         model.traverse((o) => {
           if (o.isMesh) {
             o.castShadow = false;
@@ -112,16 +119,18 @@ export class Weapon {
       })
       .catch((err) => console.error('Failed to load FPS hands model:', err));
 
-    // Muzzle flash: sprite + point light near the rifle's muzzle (position
-    // found empirically — the mesh's own frontmost point, in camera-local
-    // space, nudged a bit further out so the flash reads as erupting from
-    // the barrel rather than sitting inside it).
+    // Muzzle flash: sprite + point light near the rifle's muzzle. Position
+    // computed from the skin-weighted "Rifle" mesh's bind-pose extent
+    // (raw local ~(-0.06, 0.09, 0.7), the muzzle-end bounding-box corner)
+    // run through the same scale+180°-yaw transform as the model above,
+    // then nudged a bit further out so the flash reads as erupting from
+    // the barrel rather than sitting inside it.
     this.flash = makeGlowSprite(0xffcc77, 0.4, 0.9);
-    this.flash.position.set(0.32, 0.03, -0.02);
+    this.flash.position.set(-0.03, 0.04, -0.34);
     this.flash.visible = false;
     rifle.add(this.flash);
     this.flashLight = new THREE.PointLight(0xffaa55, 0, 8, 2);
-    this.flashLight.position.set(0.3, 0.03, -0.02);
+    this.flashLight.position.set(-0.03, 0.04, -0.32);
     rifle.add(this.flashLight);
 
     // Binoculars.
