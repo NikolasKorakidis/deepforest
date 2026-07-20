@@ -26,9 +26,9 @@ const CLIPS = {
 // comfortable lower-right FPS frame. A different offset is used while
 // aiming down sights (arms move it up toward center to look through the
 // scope). See the bottom of this file for what each number controls.
-const MODEL_SCALE = 3;
-const HIP_POS = new THREE.Vector3(0.15, -0.75, -0.55);
-const AIM_POS = new THREE.Vector3(1, -0.05, -0.3);
+const MODEL_SCALE = 1;
+const HIP_POS = new THREE.Vector3(-0.075, -0.21, -0.055);
+const AIM_POS = new THREE.Vector3(0.055, -0.26, -0.025);
 
 export class Weapon {
   constructor({ camera, input, controller, hud, sfx, getTargets }) {
@@ -120,11 +120,9 @@ export class Weapon {
       .catch((err) => console.error('Failed to load FPS hands model:', err));
 
     // Muzzle flash: sprite + point light near the rifle's muzzle. Position
-    // computed from the skin-weighted "Rifle" mesh's bind-pose extent
-    // (raw local ~(-0.06, 0.09, 0.7), the muzzle-end bounding-box corner)
-    // run through the same scale+180°-yaw transform as the model above,
-    // then nudged a bit further out so the flash reads as erupting from
-    // the barrel rather than sitting inside it.
+    // tuned visually via the /test.html viewmodel tuner (Test Fire
+    // preview) — re-check with that tool if MODEL_SCALE changes again,
+    // since this offset is relative to the model at its current scale.
     this.flash = makeGlowSprite(0xffcc77, 0.4, 0.9);
     this.flash.position.set(-0.03, 0.04, -0.34);
     this.flash.visible = false;
