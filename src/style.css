@@ -1,0 +1,277 @@
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #000;
+  font-family: system-ui, -apple-system, sans-serif;
+  user-select: none;
+}
+
+#app canvas { display: block; }
+
+.hidden { display: none !important; }
+
+/* ------------------------------------------------------------- HUD root */
+#hud {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  color: #d8d4c8;
+}
+
+/* ------------------------------------------------------------ stat bars */
+#stats {
+  position: absolute;
+  left: 18px;
+  bottom: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.stat { display: flex; align-items: center; gap: 8px; }
+
+.stat-label {
+  width: 56px;
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  opacity: 0.85;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.8);
+}
+
+.bar {
+  width: 150px;
+  height: 9px;
+  background: rgba(8, 10, 12, 0.6);
+  border: 1px solid rgba(216, 212, 200, 0.25);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.bar .fill { height: 100%; transition: width 0.3s; }
+
+.bar.critical { animation: bar-blink 0.9s infinite; }
+
+@keyframes bar-blink {
+  50% { border-color: rgba(220, 80, 60, 0.9); }
+}
+
+/* --------------------------------------------------------- right panel */
+#right-panel {
+  position: absolute;
+  right: 18px;
+  bottom: 18px;
+  text-align: right;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.9);
+}
+
+#ammo { font-size: 26px; font-weight: 600; letter-spacing: 0.05em; }
+
+#counts { font-size: 12px; opacity: 0.85; margin-top: 4px; white-space: pre; }
+
+/* -------------------------------------------------------- compass/clock */
+#compass {
+  position: absolute;
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  border-radius: 4px;
+}
+
+#clock {
+  position: absolute;
+  top: 16px;
+  right: 18px;
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  opacity: 0.9;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.9);
+}
+
+/* --------------------------------------------------- crosshair & marker */
+#crosshair {
+  position: absolute;
+  top: 50%; left: 50%;
+  width: 4px; height: 4px;
+  margin: -2px 0 0 -2px;
+  border-radius: 50%;
+  background: rgba(230, 228, 220, 0.85);
+  box-shadow: 0 0 3px rgba(0,0,0,0.8);
+}
+
+#hitmarker {
+  position: absolute;
+  top: 50%; left: 50%;
+  width: 18px; height: 18px;
+  margin: -9px 0 0 -9px;
+  opacity: 0;
+}
+#hitmarker::before, #hitmarker::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border: 2px solid #e8e4d8;
+  border-radius: 1px;
+  transform: rotate(45deg) scale(0.7);
+  border-bottom: none;
+  border-right: none;
+}
+#hitmarker::after { transform: rotate(225deg) scale(0.7); }
+#hitmarker.active { animation: hit 0.25s ease-out; }
+@keyframes hit {
+  0% { opacity: 1; transform: scale(1.25); }
+  100% { opacity: 0; transform: scale(0.9); }
+}
+
+/* ------------------------------------------------------ prompt & toasts */
+#prompt {
+  position: absolute;
+  left: 50%;
+  bottom: 22%;
+  transform: translateX(-50%);
+  padding: 7px 16px;
+  background: rgba(8, 10, 12, 0.65);
+  border: 1px solid rgba(216, 212, 200, 0.3);
+  border-radius: 4px;
+  font-size: 14px;
+  letter-spacing: 0.04em;
+}
+
+#toasts {
+  position: absolute;
+  left: 50%;
+  top: 16%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  width: 60%;
+  text-align: center;
+}
+
+.toast {
+  padding: 6px 14px;
+  background: rgba(8, 10, 12, 0.55);
+  border-radius: 4px;
+  font-size: 14px;
+  letter-spacing: 0.03em;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.8);
+  transition: opacity 0.7s;
+}
+.toast.fading { opacity: 0; }
+
+/* -------------------------------------------------------------- overlays */
+#vignette {
+  position: absolute; inset: 0;
+  background: radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,0.45) 100%);
+}
+#vignette.pulse { animation: vignette-pulse 1.6s infinite; }
+@keyframes vignette-pulse {
+  50% { background: radial-gradient(ellipse at center, transparent 40%, rgba(120,10,5,0.55) 100%); }
+}
+
+#cold-overlay {
+  position: absolute; inset: 0;
+  opacity: 0;
+  background: radial-gradient(ellipse at center, transparent 40%, rgba(80, 130, 200, 0.7) 100%);
+  transition: opacity 1s;
+}
+
+#damage-flash {
+  position: absolute; inset: 0;
+  background: radial-gradient(ellipse at center, rgba(180,20,10,0.25) 0%, rgba(150,10,5,0.55) 100%);
+  opacity: 0;
+}
+#damage-flash.active { animation: dmg 0.5s ease-out; }
+@keyframes dmg { 0% { opacity: 1; } 100% { opacity: 0; } }
+
+#binoc-mask {
+  position: absolute; inset: 0;
+  opacity: 0;
+  transition: opacity 0.15s;
+  background: radial-gradient(circle at center, transparent 34%, #000 42%);
+}
+#binoc-mask.active { opacity: 1; }
+
+#fade {
+  position: absolute; inset: 0;
+  background: #000;
+  opacity: 0;
+  transition: opacity 1.2s;
+}
+
+/* --------------------------------------------------------------- screens */
+.screen {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(4, 6, 8, 0.88);
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.screen .panel {
+  max-width: 620px;
+  padding: 40px;
+  text-align: center;
+}
+
+.screen h1 {
+  font-size: 52px;
+  letter-spacing: 0.35em;
+  font-weight: 300;
+  margin-bottom: 24px;
+  color: #e8e4d8;
+}
+
+.screen h2 {
+  font-size: 34px;
+  letter-spacing: 0.25em;
+  font-weight: 300;
+  margin-bottom: 18px;
+}
+
+.screen h2.red { color: #c94f42; }
+
+.screen p { line-height: 1.7; font-size: 15px; opacity: 0.9; margin-bottom: 18px; }
+
+.story { font-style: italic; }
+
+.controls {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px 18px;
+  margin: 22px 0;
+  font-size: 12px;
+  opacity: 0.8;
+  text-align: left;
+}
+.controls b { color: #e8b34a; font-weight: 600; }
+
+.begin {
+  margin-top: 26px;
+  letter-spacing: 0.3em;
+  font-size: 14px;
+  color: #e8b34a;
+  animation: begin-pulse 1.8s infinite;
+}
+@keyframes begin-pulse { 50% { opacity: 0.35; } }
+
+.screen button {
+  margin-top: 10px;
+  padding: 10px 30px;
+  background: transparent;
+  border: 1px solid #d8d4c8;
+  color: #d8d4c8;
+  font-size: 14px;
+  letter-spacing: 0.2em;
+  cursor: pointer;
+  font-family: inherit;
+}
+.screen button:hover { background: rgba(216, 212, 200, 0.15); }
