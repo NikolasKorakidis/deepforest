@@ -26,9 +26,9 @@ const CLIPS = {
 // comfortable lower-right FPS frame. A different offset is used while
 // aiming down sights (arms move it up toward center to look through the
 // scope). See the bottom of this file for what each number controls.
-const MODEL_SCALE = 0.42;
-const HIP_POS = new THREE.Vector3(0.1, -0.15, -0.42);
-const AIM_POS = new THREE.Vector3(0, -0.05, -0.3);
+const MODEL_SCALE = 3;
+const HIP_POS = new THREE.Vector3(0.15, -0.75, -0.55);
+const AIM_POS = new THREE.Vector3(1, -0.05, -0.3);
 
 export class Weapon {
   constructor({ camera, input, controller, hud, sfx, getTargets }) {
@@ -138,7 +138,7 @@ export class Weapon {
     const tubeMat = new THREE.MeshStandardMaterial({ color: 0x1e1f22, roughness: 0.6 });
     for (const off of [-0.035, 0.035]) {
       const tube = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.035, 0.12, 10), tubeMat);
-      tube.rotation.x = Math.PI / 2;
+      tube.rotation.x = Math.PI;
       tube.position.set(off, 0, 0);
       binoc.add(tube);
     }
