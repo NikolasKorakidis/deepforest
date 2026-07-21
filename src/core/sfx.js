@@ -131,29 +131,4 @@ export class SFX {
     osc.start(t);
     osc.stop(t + 0.9);
   }
-
-  /** Distant wolf howl for night ambience. */
-  howl() {
-    if (!this.ctx) return;
-    const t = this.ctx.currentTime;
-    const osc = this.ctx.createOscillator();
-    osc.type = 'sine';
-    osc.frequency.setValueAtTime(320, t);
-    osc.frequency.linearRampToValueAtTime(620, t + 0.9);
-    osc.frequency.linearRampToValueAtTime(380, t + 2.4);
-    const vib = this.ctx.createOscillator();
-    vib.frequency.value = 5.5;
-    const vibGain = this.ctx.createGain();
-    vibGain.gain.value = 8;
-    vib.connect(vibGain).connect(osc.frequency);
-    const g = this.ctx.createGain();
-    g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(0.09, t + 0.6);
-    g.gain.exponentialRampToValueAtTime(0.001, t + 2.6);
-    osc.connect(g).connect(this.master);
-    osc.start(t);
-    osc.stop(t + 2.7);
-    vib.start(t);
-    vib.stop(t + 2.7);
-  }
 }

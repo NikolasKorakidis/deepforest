@@ -99,9 +99,10 @@ export class Game {
       this.sfx.resume();
       this.input.lock();
       this.state = 'playing';
-      this.hud.toast('Your head pounds. The wreck is still smoking.', 5000);
-      setTimeout(() => this.hud.toast('Search the crash site for anything useful.', 5000), 4000);
-      setTimeout(() => this.hud.toast('Then follow the valley north. Move before dark.', 5000), 8500);
+      this.hud.setObjective('Look for survivors');
+      this.hud.toast('Your head pounds. The helicopter still burns behind you.', 5000);
+      setTimeout(() => this.hud.toast('No one answers your calls. Search the crash site.', 5000), 4000);
+      setTimeout(() => this.hud.toast('Then follow the valley north — into the dark.', 5000), 8500);
     });
 
     this.input.onLockChange((locked) => {
@@ -169,10 +170,7 @@ export class Game {
     this.warn('thirst', this.stats.thirst < 20, 'Your throat is parched. Find water.');
     this.warn('hunger', this.stats.hunger < 20, 'Your stomach cramps with hunger. Eat a ration (F).');
     this.warn('energy', this.stats.energy < 15, 'You are exhausted. Sleep at a campfire (G) after dark.');
-    this.warn('night', this.env.isNight, 'Night has fallen. The cold — and the wolves — get worse.', 200);
-
-    // --- night ambience ---
-    if (this.env.isNight && Math.random() < dt * 0.02) this.sfx.howl();
+    this.warn('night', this.env.isNight, 'Night has fallen. The cold gets worse — and the dark feels wrong.', 200);
 
     // --- terminal states ---
     if (!this.stats.alive) this.gameOver();
