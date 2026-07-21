@@ -43,7 +43,7 @@ function scatterTrees(scene, grid) {
       const x = gx + (hash2(ix, iz, 1) - 0.5) * 5.5;
       const z = gz + (hash2(ix, iz, 2) - 0.5) * 5.5;
       const density = fbm(x * 0.02, z * 0.02, 3, 99); // groves, not uniform
-      if (hash2(ix, iz, 3) > density * 0.78) continue;
+      if (hash2(ix, iz, 3) > density * 0.94) continue;
       if (excluded(x, z, 7.5)) continue;
       const y = terrainHeight(x, z);
       if (y > 18) continue;                 // treeline

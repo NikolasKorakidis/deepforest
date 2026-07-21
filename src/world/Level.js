@@ -1,10 +1,11 @@
 import * as THREE from 'three';
 import {
-  terrainHeight, pathX, POND, POND_RADIUS, POND_WATER_Y, CHECKPOINT,
+  terrainHeight, pathX, hash2, POND, POND_RADIUS, POND_WATER_Y, CHECKPOINT,
 } from './heightfield.js';
 import { makeGlowSprite } from '../core/glow.js';
 import { loadGLTF, normalizeModel } from '../core/assets.js';
 import { loadTreeAssets } from './TreeAssets.js';
+import { createWaterMaterial, updateWaterMaterial } from './Water.js';
 import { wolfSpawnPoints } from '../entities/Wolf.js';
 import helicopterUrl from '../assets/models/helicopter_crashed.glb?url';
 import rifleUrl from '../assets/models/rifle.glb?url';
@@ -246,10 +247,8 @@ export class Level {
 
   // ------------------------------------------------------------------ lake
   _buildPond() {
-    const waterMat = new THREE.MeshStandardMaterial({
-      color: 0x2a4a5e, roughness: 0.15, metalness: 0.1,
-      transparent: true, opacity: 0.85,
-    });
+    const waterMat = createWaterMaterial();
+    this.waterMaterial = waterMat;
 
     // Placeholder disc so the basin isn't empty for the moment it takes the
     // GLB to resolve; swapped for the real (irregular, more natural-looking)
@@ -288,44 +287,59 @@ export class Level {
     });
   }
 
-  /** A curated ring of real trees around the lake shore — denser and more
-   *  deliberate than the ambient procedural forest, to read as a set-piece
-   *  "lake area" rather than just more scattered woods. */
+  /** A curated treeline around the lake shore — denser and more deliberate
+   *  than the ambient procedural forest, to read as a set-piece "lake area"
+   *  rather than just more scattered woods. Reuses the same big/small/dead
+   *  species as the ambient forest (see TreeAssets.js), just placed by hand
+   *  in two staggered bands instead of scattered. The path-facing shore,
+   *  where the player walks up to drink, is left clear. */
   _buildLakeTrees(assets) {
-    const ringSpots = [
-      [0.35, 1.28, 'big'], [1.1, 1.22, 'small'], [2.0, 1.35, 'big'],
-      [2.7, 1.15, 'small'], [3.6, 1.3, 'big'], [4.3, 1.2, 'small'],
-      [4.9, 1.4, 'big'], [5.6, 1.1, 'small'], [0.0, 1.2, 'dead'],
+    const approachAngle = Math.atan2(0, pathX(POND.z) - POND.x); // pond -> path
+    const approachHalfWidth = 0.8;
+    const bands = [
+      { radiusMul: 1.15, count: 15, heightMul: 1.0, salt: 40 },
+      { radiusMul: 1.38, count: 15, heightMul: 1.15, salt: 60 },
     ];
-    for (const [angle, radiusMul, speciesName] of ringSpots) {
-      const species = assets[speciesName];
-      const r = POND_RADIUS * radiusMul + 2;
-      const x = POND.x + Math.cos(angle) * r;
-      const z = POND.z + Math.sin(angle) * r;
-      const y = this._groundY(x, z);
-      const scale = (BASE_LAKE_TREE_HEIGHT * (0.85 + Math.random() * 0.4)) / species.naturalHeight;
-      const rotY = Math.random() * Math.PI * 2;
 
-      // Plain mesh transform properties, NOT applyMatrix4 — the bark/leaves
-      // geometries are shared with the ambient forest's InstancedMesh, and
-      // applyMatrix4 bakes the transform into the geometry itself, which
-      // would corrupt every other user of that same geometry.
-      const bark = new THREE.Mesh(species.barkGeo, species.barkMat);
-      bark.position.set(x, y, z);
-      bark.rotation.y = rotY;
-      bark.scale.setScalar(scale);
-      bark.castShadow = true;
-      bark.receiveShadow = true;
-      this.scene.add(bark);
-      if (species.leavesGeo) {
-        const leaves = new THREE.Mesh(species.leavesGeo, species.leavesMat);
-        leaves.position.set(x, y, z);
-        leaves.rotation.y = rotY;
-        leaves.scale.setScalar(scale);
-        leaves.castShadow = true;
-        this.scene.add(leaves);
+    for (const band of bands) {
+      for (let i = 0; i < band.count; i++) {
+        const angle = (i / band.count) * Math.PI * 2 + hash2(i, band.salt, 1) * 0.4;
+        const da = Math.atan2(Math.sin(angle - approachAngle), Math.cos(angle - approachAngle));
+        if (Math.abs(da) < approachHalfWidth) continue; // keep the approach shore clear
+
+        const roll = hash2(i, band.salt, 2);
+        const speciesName = roll < 0.08 ? 'dead' : roll < 0.55 ? 'small' : 'big';
+        const species = assets[speciesName];
+
+        const r = POND_RADIUS * band.radiusMul + 2 + hash2(i, band.salt, 3) * 2.5;
+        const x = POND.x + Math.cos(angle) * r;
+        const z = POND.z + Math.sin(angle) * r;
+        const y = this._groundY(x, z);
+        const heightVar = 0.85 + hash2(i, band.salt, 4) * 0.4;
+        const scale = (BASE_LAKE_TREE_HEIGHT * band.heightMul * heightVar) / species.naturalHeight;
+        const rotY = hash2(i, band.salt, 5) * Math.PI * 2;
+
+        // Plain mesh transform properties, NOT applyMatrix4 — the bark/leaves
+        // geometries are shared with the ambient forest's InstancedMesh, and
+        // applyMatrix4 bakes the transform into the geometry itself, which
+        // would corrupt every other user of that same geometry.
+        const bark = new THREE.Mesh(species.barkGeo, species.barkMat);
+        bark.position.set(x, y, z);
+        bark.rotation.y = rotY;
+        bark.scale.setScalar(scale);
+        bark.castShadow = true;
+        bark.receiveShadow = true;
+        this.scene.add(bark);
+        if (species.leavesGeo) {
+          const leaves = new THREE.Mesh(species.leavesGeo, species.leavesMat);
+          leaves.position.set(x, y, z);
+          leaves.rotation.y = rotY;
+          leaves.scale.setScalar(scale);
+          leaves.castShadow = true;
+          this.scene.add(leaves);
+        }
+        this.grid.insert(x, z, 0.5 * scale);
       }
-      this.grid.insert(x, z, 0.5 * scale);
     }
   }
 
@@ -384,6 +398,8 @@ export class Level {
   // ---------------------------------------------------------------- update
   update(dt) {
     this.t += dt;
+
+    if (this.waterMaterial) updateWaterMaterial(this.waterMaterial, this.t);
 
     // pickup glow pulse
     const pulse = 0.24 + Math.sin(this.t * 2.5) * 0.1;
