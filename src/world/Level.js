@@ -6,7 +6,6 @@ import { makeGlowSprite } from '../core/glow.js';
 import { loadGLTF, normalizeModel } from '../core/assets.js';
 import { loadTreeAssets } from './TreeAssets.js';
 import { createWaterMaterial, updateWaterMaterial } from './Water.js';
-import { wolfSpawnPoints } from '../entities/Wolf.js';
 import helicopterUrl from '../assets/models/helicopter_crashed.glb?url';
 import rifleUrl from '../assets/models/rifle.glb?url';
 
@@ -21,6 +20,12 @@ const HELICOPTER = {
   tiltZ: 0.12,
   yOffset: 0,      // manual ground clearance tweak after normalization
 };
+
+// A second piece of wreckage, torn off in the crash and thrown clear up
+// the valley — between the crash site and the lake. This is where the
+// rifle and its ammo ended up; finding it is the "look for survivors"
+// quest beat (see _buildWreckage / _completeSurvivorsQuest).
+const WRECKAGE = { x: pathX(-34) - 7, z: -34 };
 
 // Hand-placed level content: the helicopter wreck and starting loadout at
 // the crash clearing, wood/loot along the path, the pond, and the
@@ -43,13 +48,15 @@ export class Level {
 
     this._buildHelicopter();
     this._placeStartingLoadout();
+    this._buildWreckage();
     this._placeWood();
     this._buildPond();
     this._buildSupplyCrate();
     this._buildSigns();
     this._buildCheckpoint();
 
-    this.wolfSpawns = wolfSpawnPoints(pathX, POND);
+    // No wolves on this map — it's a quiet, unsettling valley, not a hunt.
+    this.wolfSpawns = [];
     this.checkpoint = new THREE.Vector3(
       CHECKPOINT.x, terrainHeight(CHECKPOINT.x, CHECKPOINT.z), CHECKPOINT.z
     );
@@ -102,7 +109,7 @@ export class Level {
 
     // Smoke rising from the wreck (synchronous).
     for (let i = 0; i < 10; i++) {
-      const s = makeGlowSprite(0x555555, 1.5, 0.2, false);
+      const s = makeGlowSprite(0x2a2a2a, 1.7, 0.28, false);
       s.userData.phase = i / 10;
       s.position.set(hx + 0.4, 0, hz);
       this.scene.add(s);
@@ -112,10 +119,71 @@ export class Level {
     this.smokeX = hx + 0.4;
     this.smokeZ = hz;
 
+    this._buildHelicopterFire(hx, hz, groundY);
+
     // Collision footprint (independent of the mesh — always present).
     this.grid.insert(hx, hz, 2.4);
     this.grid.insert(hx - 3.5, hz + 0.8, 1.2);
     this.grid.insert(hx + 2.2, hz - 1.2, 1.4);
+  }
+
+  /** The wreck is still burning — the only warm, moving light for a long
+   *  stretch of dark valley. Two flame clusters (body + tail) plus a
+   *  flickering point light, in the same style as CampfireSystem's flames
+   *  but bigger and angrier. Lights the crash clearing dramatically enough
+   *  to read as both a landmark and a "get moving" cue. */
+  _buildHelicopterFire(hx, hz, groundY) {
+    const spots = [
+      { x: hx + 0.4, z: hz, yBase: groundY, scale: 1.5 },      // main body
+      { x: hx - 3.3, z: hz + 0.7, yBase: groundY, scale: 0.9 }, // tail section
+    ];
+
+    this.fireFlames = [];
+    for (const spot of spots) {
+      const group = new THREE.Group();
+      group.position.set(spot.x, spot.yBase, spot.z);
+
+      const outer = new THREE.Mesh(
+        new THREE.ConeGeometry(0.55 * spot.scale, 1.5 * spot.scale, 8),
+        new THREE.MeshBasicMaterial({
+          color: 0xff5a1e, transparent: true, opacity: 0.85,
+          blending: THREE.AdditiveBlending, depthWrite: false,
+        })
+      );
+      outer.position.y = 0.95 * spot.scale;
+      const inner = new THREE.Mesh(
+        new THREE.ConeGeometry(0.28 * spot.scale, 0.95 * spot.scale, 8),
+        new THREE.MeshBasicMaterial({
+          color: 0xffcf55, transparent: true, opacity: 0.9,
+          blending: THREE.AdditiveBlending, depthWrite: false,
+        })
+      );
+      inner.position.y = 0.85 * spot.scale;
+      const glow = makeGlowSprite(0xff7a33, 3.6 * spot.scale, 0.4);
+      glow.position.y = 1 * spot.scale;
+      group.add(outer, inner, glow);
+      this.scene.add(group);
+      this.fireFlames.push({ group, outer, inner, glow, phase: Math.random() * Math.PI * 2 });
+    }
+
+    // A strong, flickering firelight — warm against the cold moonlight. No
+    // shadow-casting (matches CampfireSystem's fire light): a shadow-casting
+    // point light is expensive for what it'd add here.
+    this.fireLight = new THREE.PointLight(0xff5a22, 5, 40, 1.7);
+    this.fireLight.position.set(hx + 0.4, groundY + 2.4, hz);
+    this.scene.add(this.fireLight);
+
+    // A handful of sparks/embers popping up out of the blaze.
+    this.embers = [];
+    for (let i = 0; i < 14; i++) {
+      const e = makeGlowSprite(0xffb655, 0.3, 0.8);
+      e.userData.phase = i / 14;
+      e.userData.spotX = spots[i % spots.length].x;
+      e.userData.spotZ = spots[i % spots.length].z;
+      this.scene.add(e);
+      this.embers.push(e);
+    }
+    this.fireBaseY = groundY;
   }
 
   // --------------------------------------------------------------- pickups
@@ -156,26 +224,13 @@ export class Level {
     return g;
   }
 
+  // Only the compass and binoculars start at the crash site — no weapon
+  // here. The rifle and ammo are further up the valley at the wreckage
+  // (see _buildWreckage), which doubles as the "look for survivors" quest
+  // objective.
   _placeStartingLoadout() {
     const inv = this.inventory;
     const hud = this.hud;
-
-    this._addPickup(
-      this._makeRifleProp(), 1.8, 1.5,
-      'Take hunting rifle (loaded)',
-      () => {
-        inv.hasRifle = true;
-        this.weapon.giveRifle();
-        hud.toast('Rifle equipped — LMB fire, RMB aim, R reload, 1 to holster.');
-      }
-    );
-
-    const magBox = new THREE.Mesh(
-      new THREE.BoxGeometry(0.28, 0.14, 0.2),
-      new THREE.MeshStandardMaterial({ color: 0x3a4030, roughness: 0.8 })
-    );
-    this._addPickup(magBox, 2.6, 0.2, 'Take rifle magazines (+10 rounds)',
-      () => this.weapon.addAmmo(10));
 
     const compass = new THREE.Mesh(
       new THREE.CylinderGeometry(0.12, 0.12, 0.05, 12),
@@ -207,6 +262,73 @@ export class Level {
       inv.rations += 3;
       hud.toast('Rations stowed. Press F to eat one.');
     });
+  }
+
+  // ---------------------------------------------------------- wreckage
+  /** A torn-off section of fuselage thrown clear in the crash, found further
+   *  up the valley between the crash site and the lake — cold and quiet,
+   *  unlike the still-burning helicopter. The rifle and its ammo ended up
+   *  here; finding it is the payoff for the "look for survivors" objective:
+   *  no one made it this far either, just their gear. */
+  _buildWreckage() {
+    const x = WRECKAGE.x, z = WRECKAGE.z;
+    const y = this._groundY(x, z);
+    const metalMat = new THREE.MeshStandardMaterial({ color: 0x4a4d4f, roughness: 0.7, metalness: 0.6 });
+    const scorchMat = new THREE.MeshStandardMaterial({ color: 0x1c1815, roughness: 1 });
+
+    const scorch = new THREE.Mesh(new THREE.CircleGeometry(2.6, 20), scorchMat);
+    scorch.rotation.x = -Math.PI / 2;
+    scorch.position.set(x, y + 0.03, z);
+    scorch.receiveShadow = true;
+    this.scene.add(scorch);
+
+    const g = new THREE.Group();
+    g.position.set(x, y, z);
+
+    const panel = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.9, 0.06), metalMat);
+    panel.position.set(0, 0.5, 0);
+    panel.rotation.set(0.3, 0.6, 0.5); // buckled, half-buried
+    g.add(panel);
+
+    const strut = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.06, 1.6, 6), metalMat);
+    strut.position.set(-1, 0.35, 0.6);
+    strut.rotation.set(0.2, 0, 1.1);
+    g.add(strut);
+
+    const blade = new THREE.Mesh(new THREE.BoxGeometry(2.6, 0.05, 0.28), metalMat);
+    blade.position.set(0.8, 0.12, -0.9);
+    blade.rotation.y = 0.9;
+    g.add(blade);
+
+    g.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+    this.scene.add(g);
+    this.grid.insert(x, z, 1.6);
+
+    // The rifle and its magazines — moved here from the crash site.
+    this._addPickup(
+      this._makeRifleProp(), x + 0.6, z - 1.1,
+      'Take hunting rifle (loaded)',
+      () => {
+        this.inventory.hasRifle = true;
+        this.weapon.giveRifle();
+        this.hud.toast('Rifle equipped — LMB fire, RMB aim, R reload, 1 to holster.');
+        this._completeSurvivorsQuest();
+      }
+    );
+
+    const magBox = new THREE.Mesh(
+      new THREE.BoxGeometry(0.28, 0.14, 0.2),
+      new THREE.MeshStandardMaterial({ color: 0x3a4030, roughness: 0.8 })
+    );
+    this._addPickup(magBox, x - 0.7, z + 0.9, 'Take rifle magazines (+10 rounds)',
+      () => this.weapon.addAmmo(10));
+  }
+
+  _completeSurvivorsQuest() {
+    if (this.questComplete) return;
+    this.questComplete = true;
+    this.hud.setObjective('No survivors — just their gear', true);
+    this.hud.toast("Whoever carried this didn't leave willingly. You're on your own out here.", 6500);
   }
 
   // ------------------------------------------------------------- wood/loot
@@ -419,5 +541,29 @@ export class Level {
 
     // checkpoint flag wave
     if (this.flag) this.flag.rotation.y = Math.sin(this.t * 2.2) * 0.35;
+
+    // helicopter fire: flicker the flames and the light together
+    if (this.fireLight) {
+      const flicker = Math.sin(this.t * 14) * 0.3 + Math.sin(this.t * 31 + 1.3) * 0.18
+        + Math.sin(this.t * 7.3) * 0.15;
+      this.fireLight.intensity = 5 + flicker * 1.8;
+      for (const f of this.fireFlames) {
+        const fl = Math.sin(this.t * 12 + f.phase) * 0.25 + Math.sin(this.t * 27 + f.phase) * 0.15;
+        const s = 1 + fl * 0.4;
+        f.outer.scale.set(s, 0.9 + fl * 0.5, s);
+        f.inner.scale.set(s, 1 + fl * 0.35, s);
+        f.glow.material.opacity = 0.4 + fl * 0.15;
+      }
+      for (const e of this.embers) {
+        const cycle = (this.t * 0.35 + e.userData.phase) % 1;
+        e.position.set(
+          e.userData.spotX + Math.sin(cycle * 11 + e.userData.phase * 30) * 1.4,
+          this.fireBaseY + cycle * 4.5,
+          e.userData.spotZ + Math.cos(cycle * 8 + e.userData.phase * 20) * 1.4
+        );
+        e.material.opacity = 0.85 * (1 - cycle);
+        e.scale.setScalar(0.5 + (1 - cycle) * 0.6);
+      }
+    }
   }
 }

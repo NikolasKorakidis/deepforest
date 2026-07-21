@@ -44,10 +44,45 @@ export class Environment {
 
     this.stars = this._makeStars();
     scene.add(this.stars);
+
+    this.moon = this._makeMoon();
+    scene.add(this.moon);
+    // Fixed low compass direction, roughly ahead up the valley — a big,
+    // low-hanging moon framed over the route rather than something that
+    // rises and sets like the sun/moon light does.
+    this.moonDir = new THREE.Vector3(0.42, 0.16, -0.89).normalize();
+  }
+
+  _makeMoon() {
+    const c = document.createElement('canvas');
+    c.width = c.height = 256;
+    const ctx = c.getContext('2d');
+    const g = ctx.createRadialGradient(128, 128, 0, 128, 128, 128);
+    g.addColorStop(0, 'rgba(255,251,240,1)');
+    g.addColorStop(0.4, 'rgba(255,248,228,0.95)');
+    g.addColorStop(0.62, 'rgba(226,224,210,0.45)');
+    g.addColorStop(1, 'rgba(226,224,210,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, 256, 256);
+    // A few faint crater blotches so the disc reads as a moon, not a blob.
+    ctx.globalCompositeOperation = 'multiply';
+    ctx.fillStyle = 'rgba(210,206,196,0.5)';
+    for (const [cx, cy, r] of [[95, 100, 22], [160, 150, 16], [110, 175, 12], [175, 90, 10]]) {
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    const tex = new THREE.CanvasTexture(c);
+    const mat = new THREE.SpriteMaterial({
+      map: tex, color: 0xfff6e0, transparent: true, depthWrite: false, fog: false,
+    });
+    const moon = new THREE.Sprite(mat);
+    moon.scale.setScalar(185); // huge — meant to loom low over the horizon
+    return moon;
   }
 
   _makeStars() {
-    const count = 900;
+    const count = 2400;
     const positions = new Float32Array(count * 3);
     for (let i = 0; i < count; i++) {
       // random point on the upper hemisphere of a big dome
@@ -127,5 +162,13 @@ export class Environment {
 
     this.stars.material.opacity = 1 - this.daylight;
     this.stars.position.set(playerPos.x, 0, playerPos.z);
+
+    const moonDist = 620;
+    this.moon.position.set(
+      playerPos.x + this.moonDir.x * moonDist,
+      this.moonDir.y * moonDist,
+      playerPos.z + this.moonDir.z * moonDist
+    );
+    this.moon.material.opacity = 1 - this.daylight;
   }
 }

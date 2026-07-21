@@ -36,6 +36,7 @@ export class HUD {
 
       <canvas id="compass" width="300" height="34" class="hidden"></canvas>
       <div id="clock"></div>
+      <div id="objective" class="hidden"></div>
       <div id="crosshair" class="hidden"></div>
       <div id="hitmarker"></div>
       <div id="prompt" class="hidden"></div>
@@ -44,9 +45,9 @@ export class HUD {
       <div id="start-screen" class="screen">
         <div class="panel">
           <h1>DEEP FOREST</h1>
-          <p class="story">The helicopter went down at dawn. Everyone else is gone.<br>
-          You are hurt, cold, and hungry — and the valley ahead is the only way out.<br>
-          Scavenge the wreck. Follow the path north. Survive the nights.</p>
+          <p class="story">The helicopter went down in the dark. It's still burning.<br>
+          You are hurt, cold, and alone — and the valley ahead is the only way out.<br>
+          Look for survivors. Scavenge what you can. Follow the path north.</p>
           <div class="controls">
             <span><b>WASD</b> move</span><span><b>Shift</b> sprint</span>
             <span><b>Mouse</b> look</span><span><b>E</b> interact</span>
@@ -116,6 +117,14 @@ export class HUD {
 
   setClock(day, timeStr) {
     this.el('clock').textContent = `Day ${day} · ${timeStr}`;
+  }
+
+  // -------------------------------------------------------------- objective
+  setObjective(text, complete = false) {
+    const el = this.el('objective');
+    el.classList.toggle('hidden', !text);
+    el.classList.toggle('complete', complete);
+    if (text) el.textContent = (complete ? '✓ ' : '▸ ') + text;
   }
 
   // --------------------------------------------------------------- compass

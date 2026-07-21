@@ -2,7 +2,7 @@
 
 export const CONFIG = {
   dayLengthSec: 720,        // one full day-night cycle = 12 real minutes
-  startTimeOfDay: 0.34,     // ~08:10, morning after the crash
+  startTimeOfDay: 0.02,     // ~00:29, deep night — the crash just happened
 
   player: {
     walkSpeed: 4.3,
