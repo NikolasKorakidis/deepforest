@@ -7,8 +7,12 @@ export const CONFIG = {
   player: {
     walkSpeed: 4.3,
     sprintSpeed: 6.6,
+    crouchSpeed: 2.1,
+    proneSpeed: 1.0,
     radius: 0.45,
     eyeHeight: 1.62,
+    eyeHeightCrouch: 0.95,
+    eyeHeightProne: 0.42,
     lookSensitivity: 0.0021,
   },
 

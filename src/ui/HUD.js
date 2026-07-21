@@ -55,6 +55,8 @@ export class HUD {
             <span><b>R</b> reload</span><span><b>1 / 2</b> rifle / binoculars</span>
             <span><b>F</b> eat ration</span><span><b>T</b> build campfire</span>
             <span><b>G</b> sleep at fire</span><span><b>Esc</b> pause</span>
+            <span><b>Ctrl</b> crouch (hold)</span><span><b>C</b> toggle crouch</span>
+            <span><b>Z</b> toggle prone</span>
           </div>
           <p class="begin">CLICK TO BEGIN</p>
         </div>
