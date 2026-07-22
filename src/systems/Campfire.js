@@ -4,22 +4,30 @@ import { terrainHeight } from '../world/heightfield.js';
 import { makeGlowSprite } from '../core/glow.js';
 
 // Campfires: built anywhere on open ground for wood. A lit fire radiates
-// warmth in a radius and enables sleeping through the night.
+// warmth in a radius; pressing E beside a lit one opens a menu (handled by
+// Game.js/HUD) to cook a ration or sleep through the night.
 
 export class CampfireSystem {
-  constructor(scene, sfx) {
+  /**
+   * @param onInteract(fire) called when the player presses E beside a
+   *   still-lit fire — Game.js uses this to open the cook/sleep menu.
+   */
+  constructor(scene, sfx, interactions, onInteract) {
     this.scene = scene;
     this.sfx = sfx;
+    this.interactions = interactions;
+    this.onInteract = onInteract;
     this.fires = [];
     this.nearFire = false;
     this.t = 0;
   }
 
+  /** @returns true if a fire was actually built (false if there's not enough wood). */
   tryBuild(controller, inventory, hud) {
     const cost = CONFIG.fire.woodCost;
     if (inventory.wood < cost) {
       hud.toast(`Not enough wood — need ${cost}, have ${inventory.wood}. Gather branches (E).`);
-      return;
+      return false;
     }
     inventory.wood -= cost;
 
@@ -71,24 +79,26 @@ export class CampfireSystem {
     group.add(flameOuter, flameInner, glow, light);
 
     this.scene.add(group);
-    this.fires.push({
+    const fire = {
       group, flameOuter, flameInner, glow, light,
       pos: new THREE.Vector3(x, y, z),
       fuel: CONFIG.fire.burnTimeSec,
+    };
+    this.fires.push(fire);
+
+    this.interactions.add({
+      position: fire.pos.clone(),
+      radius: CONFIG.fire.warmRadius,
+      label: 'Campfire',
+      onUse: () => {
+        if (fire.fuel <= 0) hud.toast('This campfire has burned out.');
+        else this.onInteract(fire);
+      },
     });
 
     this.sfx.build();
-    hud.toast('You build a campfire. Stay close to warm up — sleep with G at night.');
-  }
-
-  /** Burn down the nearest lit fire after sleeping (embers by morning). */
-  consumeForSleep(playerPos) {
-    for (const f of this.fires) {
-      if (f.fuel > 0 && f.pos.distanceTo(playerPos) < CONFIG.fire.warmRadius + 1) {
-        f.fuel = Math.min(f.fuel, 30);
-        return;
-      }
-    }
+    hud.toast('You build a campfire. Stay close to warm up — press E to cook or sleep.');
+    return true;
   }
 
   update(dt, playerPos, hud) {

@@ -69,7 +69,10 @@ export class Game {
       sfx: this.sfx,
       getTargets: () => this.wolves.filter((w) => !w.dead).map((w) => w.group),
     });
-    this.campfires = new CampfireSystem(this.scene, this.sfx);
+    this.campfires = new CampfireSystem(
+      this.scene, this.sfx, this.interactions,
+      (fire) => this.openCampfireMenu(fire)
+    );
     this.level = new Level({
       scene: this.scene, grid: this.grid, interactions: this.interactions,
       inventory: this.inventory, weapon: this.weapon, stats: this.stats,
@@ -84,9 +87,13 @@ export class Game {
     // --- discrete actions ---
     this.input.onPress('KeyF', () => this.eatRation());
     this.input.onPress('KeyT', () => {
-      if (this.state === 'playing') this.campfires.tryBuild(this.controller, this.inventory, this.hud);
+      if (this.state !== 'playing') return;
+      if (this.campfires.tryBuild(this.controller, this.inventory, this.hud)) {
+        this.level.notifyCampfireBuilt();
+      }
     });
-    this.input.onPress('KeyG', () => this.trySleep());
+    // Sleeping (and now cooking) happens through the campfire's own E-menu
+    // (see openCampfireMenu) rather than a standalone key.
 
     this.stats.onDamaged = () => this.hud.damageFlash();
 
@@ -169,7 +176,7 @@ export class Game {
     this.warn('freeze', this.stats.warmth < 25, 'You are freezing. Build a campfire (T) — you need 3 wood.');
     this.warn('thirst', this.stats.thirst < 20, 'Your throat is parched. Find water.');
     this.warn('hunger', this.stats.hunger < 20, 'Your stomach cramps with hunger. Eat a ration (F).');
-    this.warn('energy', this.stats.energy < 15, 'You are exhausted. Sleep at a campfire (G) after dark.');
+    this.warn('energy', this.stats.energy < 15, 'You are exhausted. Rest at a campfire (E) after dark.');
     this.warn('night', this.env.isNight, 'Night has fallen. The cold gets worse — and the dark feels wrong.', 200);
 
     // --- terminal states ---
@@ -197,12 +204,41 @@ export class Game {
     this.hud.toast('You eat a ration. A little strength returns.');
   }
 
-  async trySleep() {
+  /** Opens the pizza-slice cook/sleep menu for a specific lit campfire.
+   *  Pointer lock is released for the duration (the menu is a normal
+   *  clickable HTML overlay, same as the pause screen) and re-acquired
+   *  once the player picks an option or cancels. `state = 'menu'` keeps
+   *  the lock-change handler from mistaking this for the pause screen. */
+  async openCampfireMenu(fire) {
     if (this.state !== 'playing') return;
-    if (!this.campfires.nearFire) {
-      this.hud.toast('You need to be beside a burning campfire to sleep.');
+    const canCook = this.inventory.rations > 0;
+    const canSleep = this.env.daylight <= 0.5;
+
+    this.state = 'menu';
+    document.exitPointerLock();
+    const key = await this.hud.showRadialMenu([
+      { key: 'cook', label: canCook ? 'Cook' : 'Cook (no rations)', enabled: canCook },
+      { key: 'sleep', label: canSleep ? 'Sleep' : 'Sleep (too bright)', enabled: canSleep },
+    ]);
+    this.state = 'playing';
+    this.input.lock();
+
+    if (key === 'cook') this.cookAtFire();
+    else if (key === 'sleep') await this.sleepAtFire(fire);
+  }
+
+  cookAtFire() {
+    if (this.inventory.rations <= 0) {
+      this.hud.toast('No rations left to cook.');
       return;
     }
+    this.inventory.rations--;
+    this.stats.cookedMeal();
+    this.sfx.eat();
+    this.hud.toast('You cook and eat a ration over the fire — hot food, real warmth.');
+  }
+
+  async sleepAtFire(fire) {
     if (this.env.daylight > 0.5) {
       this.hud.toast('It is too bright to sleep. Wait for evening.');
       return;
@@ -211,11 +247,12 @@ export class Game {
     await this.hud.fade(true);
     this.env.skipToMorning();
     this.stats.applySleep();
-    this.campfires.consumeForSleep(this.controller.position);
+    fire.fuel = Math.min(fire.fuel, 30); // burns down to embers overnight
     this.env.update(0.001, this.controller.position); // refresh lighting before reveal
     await this.hud.fade(false);
     this.state = 'playing';
-    this.hud.toast('You wake stiff and cold at dawn — but rested.');
+    this.hud.toast('You wake at first light, stiff and cold — but rested.');
+    this.level.notifySlept();
   }
 
   gameOver() {

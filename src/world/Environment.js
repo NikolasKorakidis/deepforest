@@ -117,10 +117,14 @@ export class Environment {
     return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
   }
 
-  /** Jump to the next morning (used by sleeping at a campfire). */
+  /** Jump to the next morning (used by sleeping at a campfire). Lands just
+   *  past the sunrise threshold (time=0.25 is exactly horizon) — early
+   *  enough that the sun is barely up and the sky still carries a warm
+   *  dawn tint, rather than mid-morning full daylight. */
   skipToMorning() {
-    if (this.time > 0.3) this.day++;
-    this.time = 0.3;
+    const DAWN = 0.26;
+    if (this.time > DAWN) this.day++;
+    this.time = DAWN;
   }
 
   update(dt, playerPos) {

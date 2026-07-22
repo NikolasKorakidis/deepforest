@@ -10,6 +10,19 @@ const STAT_DEFS = [
   ['energy', 'Energy', '#7fa845'],
 ];
 
+/** clip-path polygon for wedge `i` of `n` equal pie slices, 12-o'clock start. */
+function wedgePolygon(i, n) {
+  const start = (i / n) * 2 * Math.PI - Math.PI / 2;
+  const end = ((i + 1) / n) * 2 * Math.PI - Math.PI / 2;
+  const steps = 16;
+  const points = ['50% 50%'];
+  for (let s = 0; s <= steps; s++) {
+    const a = start + (end - start) * (s / steps);
+    points.push(`${50 + 50 * Math.cos(a)}% ${50 + 50 * Math.sin(a)}%`);
+  }
+  return `polygon(${points.join(',')})`;
+}
+
 export class HUD {
   constructor() {
     const root = document.createElement('div');
@@ -42,6 +55,10 @@ export class HUD {
       <div id="prompt" class="hidden"></div>
       <div id="toasts"></div>
 
+      <div id="radial-menu" class="hidden">
+        <div class="radial-wheel" id="radial-wheel"></div>
+      </div>
+
       <div id="start-screen" class="screen">
         <div class="panel">
           <h1>DEEP FOREST</h1>
@@ -54,7 +71,7 @@ export class HUD {
             <span><b>LMB</b> fire</span><span><b>RMB</b> aim / zoom</span>
             <span><b>R</b> reload</span><span><b>1 / 2</b> rifle / binoculars</span>
             <span><b>F</b> eat ration</span><span><b>T</b> build campfire</span>
-            <span><b>G</b> sleep at fire</span><span><b>Esc</b> pause</span>
+            <span><b>E</b> at fire: cook / sleep</span><span><b>Esc</b> pause</span>
           </div>
           <p class="begin">CLICK TO BEGIN</p>
         </div>
@@ -219,6 +236,60 @@ export class HUD {
     el.style.transitionDuration = seconds + 's';
     el.style.opacity = toBlack ? 1 : 0;
     return new Promise((resolve) => setTimeout(resolve, seconds * 1000));
+  }
+
+  // ------------------------------------------------------------ radial menu
+  /**
+   * A pizza-slice selection wheel (PUBG-style) for campfire actions. Shows
+   * a real OS cursor for clicking (pointer lock is released by the caller
+   * beforehand) rather than a locked-camera virtual-cursor trick.
+   * @param options [{ key, label, enabled }]
+   * @returns Promise<string|null> the chosen key, or null if cancelled
+   *   (Escape or clicking the backdrop).
+   */
+  showRadialMenu(options) {
+    const menu = this.el('radial-menu');
+    const wheel = this.el('radial-wheel');
+    wheel.innerHTML = '';
+
+    return new Promise((resolve) => {
+      let settled = false;
+      const finish = (key) => {
+        if (settled) return;
+        settled = true;
+        menu.classList.add('hidden');
+        document.removeEventListener('keydown', onKeyDown);
+        menu.removeEventListener('click', onBackdropClick);
+        resolve(key);
+      };
+      const onKeyDown = (e) => { if (e.code === 'Escape') finish(null); };
+      const onBackdropClick = (e) => { if (e.target === menu) finish(null); };
+
+      const n = options.length;
+      options.forEach((opt, i) => {
+        const wedge = document.createElement('div');
+        wedge.className = 'radial-wedge' + (opt.enabled === false ? ' disabled' : '');
+        wedge.style.clipPath = wedgePolygon(i, n);
+
+        const midDeg = ((i + 0.5) / n) * 360 - 90;
+        const rad = (midDeg * Math.PI) / 180;
+        const label = document.createElement('span');
+        label.className = 'radial-label';
+        label.style.left = (50 + 32 * Math.cos(rad)) + '%';
+        label.style.top = (50 + 32 * Math.sin(rad)) + '%';
+        label.textContent = opt.label;
+        wedge.appendChild(label);
+
+        if (opt.enabled !== false) {
+          wedge.addEventListener('click', () => finish(opt.key));
+        }
+        wheel.appendChild(wedge);
+      });
+
+      document.addEventListener('keydown', onKeyDown);
+      menu.addEventListener('click', onBackdropClick);
+      menu.classList.remove('hidden');
+    });
   }
 
   // --------------------------------------------------------------- screens

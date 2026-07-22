@@ -32,6 +32,13 @@ export class PlayerStats {
     this.health = clamp(this.health + 4, 0, 100);
   }
 
+  /** A ration cooked over a fire rather than eaten raw — bigger payoff. */
+  cookedMeal() {
+    this.hunger = clamp(this.hunger + 60, 0, 100);
+    this.health = clamp(this.health + 8, 0, 100);
+    this.warmth = clamp(this.warmth + 10, 0, 100);
+  }
+
   drink() {
     this.thirst = 100;
   }

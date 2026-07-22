@@ -46,9 +46,16 @@ export class Level {
     this.pickupSprites = [];
     this.smoke = [];
 
+    // Quest chain: 1 find survivors -> 2 build a campfire -> 3 sleep -> 4 done.
+    // Each _completeX/notifyX advances the stage and stages the next
+    // objective text a few seconds later so the player has time to read
+    // the completion line before it's replaced.
+    this.questStage = 1;
+
     this._buildHelicopter();
     this._placeStartingLoadout();
     this._buildWreckage();
+    this._buildBeacon();
     this._placeWood();
     this._buildPond();
     this._buildSupplyCrate();
@@ -127,58 +134,15 @@ export class Level {
     this.grid.insert(hx + 2.2, hz - 1.2, 1.4);
   }
 
-  /** A signal flare planted upright near the wreck — the only warm, moving
-   *  light for a long stretch of dark valley. Burns steadier than an open
-   *  fire (gentle flicker, not the wild cone-flame look), throws a bright
-   *  red light across the clearing and up the fuselage, and trails smoke.
-   *  Reads as both a landmark and a "someone was signaling for help" cue. */
+  /** Just the light a flare would throw — no visible prop. Illuminates the
+   *  crash clearing and rakes up the fuselage without an object to tune/
+   *  clutter the scene up close. */
   _buildFlare(hx, hz, groundY) {
     const fx = hx + 2.6, fz = hz + 1.4; // a few units clear of the fuselage
     const fy = this._groundY(fx, fz);
-
-    const group = new THREE.Group();
-    group.position.set(fx, fy, fz);
-    group.rotation.set(0.22, 2.1, 0.16); // jammed into the ground at a lean
-
-    const bodyMat = new THREE.MeshStandardMaterial({ color: 0x4a0d0d, roughness: 0.6 });
-    const body = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.03, 0.32, 8), bodyMat);
-    body.position.y = 0.16;
-    group.add(body);
-
-    const tipMat = new THREE.MeshStandardMaterial({
-      color: 0xff2010, emissive: 0xff2010, emissiveIntensity: 2.5, roughness: 0.3,
-    });
-    const tip = new THREE.Mesh(new THREE.SphereGeometry(0.035, 8, 8), tipMat);
-    tip.position.y = 0.34;
-    group.add(tip);
-    this.flareTipMat = tipMat;
-
-    this.flareGlow = makeGlowSprite(0xff2010, 2.6, 0.55);
-    this.flareGlow.position.set(fx, fy + 0.36, fz);
-    this.scene.add(this.flareGlow);
-
-    group.traverse((o) => { if (o.isMesh) o.castShadow = true; });
-    this.scene.add(group);
-
-    // Raised a bit above the physical tip so it rakes evenly up the
-    // fuselage instead of just lighting the ground around the flare.
     this.flareLight = new THREE.PointLight(0xff2010, 6, 45, 1.8);
     this.flareLight.position.set(fx, fy + 1.2, fz);
     this.scene.add(this.flareLight);
-
-    // Thin trail of dark, red-lit smoke — same drifting rig as the
-    // wreck's engine smoke, just sparser and tinted from the flare.
-    this.flareSmoke = [];
-    for (let i = 0; i < 8; i++) {
-      const s = makeGlowSprite(0x502420, 1.1, 0.2, false);
-      s.userData.phase = i / 8;
-      s.position.set(fx, fy, fz);
-      this.scene.add(s);
-      this.flareSmoke.push(s);
-    }
-    this.flareBaseY = fy + 0.35;
-    this.flareX = fx;
-    this.flareZ = fz;
   }
 
   // --------------------------------------------------------------- pickups
@@ -320,10 +284,122 @@ export class Level {
   }
 
   _completeSurvivorsQuest() {
-    if (this.questComplete) return;
-    this.questComplete = true;
+    if (this.questStage !== 1) return;
+    this.questStage = 2;
     this.hud.setObjective('No survivors — just their gear', true);
     this.hud.toast("Whoever carried this didn't leave willingly. You're on your own out here.", 6500);
+    setTimeout(() => {
+      this.hud.setObjective('Build a campfire');
+      this.hud.toast('You should get a fire going before the cold gets worse.', 5500);
+    }, 4000);
+  }
+
+  /** Called by Game.js right after a campfire is successfully built. */
+  notifyCampfireBuilt() {
+    if (this.questStage !== 2) return;
+    this.questStage = 3;
+    this.hud.setObjective('Camp made — settle in for the night', true);
+    setTimeout(() => {
+      this.hud.setObjective('Sleep until morning');
+      this.hud.toast('Press E at the campfire to cook or sleep until dawn.', 5500);
+    }, 3500);
+  }
+
+  /** Called by Game.js right after the player sleeps through to dawn. */
+  notifySlept() {
+    if (this.questStage !== 3) return;
+    this.questStage = 4;
+    this.hud.setObjective('Rested until dawn', true);
+  }
+
+  /** A signal flare planted at the wreckage — unlike the crash-site flare
+   *  (light only, no prop), this one needs to actually pull the player's
+   *  eye from a distance across the dark valley, so it gets the full
+   *  treatment: a visible prop, a light that pulses deliberately (a slow
+   *  beacon pulse, not ambient flicker) rather than something the player
+   *  reads as "on fire," and smoke that visibly brightens/reddens in sync
+   *  with the pulse so the glow reads through it at range. The glow
+   *  sprite is fog-immune (`fog = false`) — that's what actually carries
+   *  visibility across the valley; the point light mostly matters once
+   *  the player is already close. */
+  _buildBeacon() {
+    const bx = WRECKAGE.x + 1.8, bz = WRECKAGE.z + 1.6; // clear of the wreckage props
+    const by = this._groundY(bx, bz);
+
+    const group = new THREE.Group();
+    group.position.set(bx, by, bz);
+    group.rotation.set(0.2, 1.4, 0.12);
+
+    const bodyMat = new THREE.MeshStandardMaterial({ color: 0x4a0d0d, roughness: 0.6 });
+    const body = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.03, 0.32, 8), bodyMat);
+    body.position.y = 0.16;
+    group.add(body);
+
+    const tipMat = new THREE.MeshStandardMaterial({
+      color: 0xff2010, emissive: 0xff2010, emissiveIntensity: 2, roughness: 0.3,
+    });
+    const tip = new THREE.Mesh(new THREE.SphereGeometry(0.035, 8, 8), tipMat);
+    tip.position.y = 0.34;
+    group.add(tip);
+    this.beaconTipMat = tipMat;
+
+    group.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+    this.scene.add(group);
+
+    // The long-range visibility cue — sized generously and immune to fog
+    // so it still reads as a distant red glow through the valley haze.
+    this.beaconGlow = makeGlowSprite(0xff2010, 3.2, 0.6);
+    this.beaconGlow.position.set(bx, by + 0.4, bz);
+    this.beaconGlow.material.fog = false;
+    this.scene.add(this.beaconGlow);
+
+    this.beaconLight = new THREE.PointLight(0xff2010, 7, 55, 1.7);
+    this.beaconLight.position.set(bx, by + 1.3, bz);
+    this.scene.add(this.beaconLight);
+
+    // Smoke trail — color lerps toward a bright red-orange at the peak of
+    // each pulse (and fades back at the trough), so it reads as lit from
+    // within rather than just dark drifting haze.
+    this._beaconSmokeLow = new THREE.Color(0x4a2420);
+    this._beaconSmokeHigh = new THREE.Color(0xff6a3a);
+    this.beaconSmoke = [];
+    for (let i = 0; i < 10; i++) {
+      const s = makeGlowSprite(0x4a2420, 1.3, 0.24, false);
+      s.userData.phase = i / 10;
+      s.position.set(bx, by, bz);
+      this.scene.add(s);
+      this.beaconSmoke.push(s);
+    }
+    this.beaconBaseY = by + 0.35;
+    this.beaconX = bx;
+    this.beaconZ = bz;
+  }
+
+  _updateBeacon() {
+    if (!this.beaconLight) return;
+
+    // Slow, deliberate pulse (~4s cycle) — a signal, not a flame.
+    const pulse = 0.5 + 0.5 * Math.sin(this.t * 1.6);
+    this.beaconLight.intensity = 4 + pulse * 5;
+    this.beaconTipMat.emissiveIntensity = 1.6 + pulse * 2;
+    this.beaconGlow.material.opacity = 0.4 + pulse * 0.35;
+    const gs = 1 + pulse * 0.25;
+    this.beaconGlow.scale.set(3.2 * gs, 3.2 * gs, 1);
+
+    for (const s of this.beaconSmoke) {
+      const cycle = (this.t * 0.14 + s.userData.phase) % 1;
+      s.position.set(
+        this.beaconX + Math.sin(cycle * 8 + s.userData.phase * 20) * 0.4,
+        this.beaconBaseY + cycle * 4.5,
+        this.beaconZ + Math.cos(cycle * 6) * 0.35
+      );
+      // Brightest near the source and at the peak of the pulse — the
+      // "smoke lit by the light" cue the rest of the fade doesn't give.
+      const nearSource = 1 - cycle;
+      s.material.color.copy(this._beaconSmokeLow).lerp(this._beaconSmokeHigh, pulse * nearSource);
+      s.material.opacity = (0.18 + pulse * 0.12 * nearSource) * (1 - cycle * 0.7);
+      s.scale.setScalar(0.9 + cycle * 2.2);
+    }
   }
 
   // ------------------------------------------------------------- wood/loot
@@ -537,26 +613,13 @@ export class Level {
     // checkpoint flag wave
     if (this.flag) this.flag.rotation.y = Math.sin(this.t * 2.2) * 0.35;
 
-    // signal flare: gentle, steady flicker — not the wild cone-flame look —
-    // plus its trail of drifting smoke.
+    // crash-site flare light: gentle, steady flicker — not the wild
+    // cone-flame look. No prop, no smoke, just the light.
     if (this.flareLight) {
       const flicker = Math.sin(this.t * 9) * 0.12 + Math.sin(this.t * 22 + 1.3) * 0.06;
       this.flareLight.intensity = 6 + flicker;
-      this.flareTipMat.emissiveIntensity = 2.5 + flicker * 0.8;
-      this.flareGlow.material.opacity = 0.55 + flicker * 0.15;
-      const gs = 1 + flicker * 0.15;
-      this.flareGlow.scale.set(2.6 * gs, 2.6 * gs, 1);
-
-      for (const s of this.flareSmoke) {
-        const cycle = (this.t * 0.16 + s.userData.phase) % 1;
-        s.position.set(
-          this.flareX + Math.sin(cycle * 8 + s.userData.phase * 20) * 0.35,
-          this.flareBaseY + cycle * 4,
-          this.flareZ + Math.cos(cycle * 6) * 0.3
-        );
-        s.material.opacity = 0.2 * (1 - cycle);
-        s.scale.setScalar(0.8 + cycle * 2);
-      }
     }
+
+    this._updateBeacon();
   }
 }

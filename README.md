@@ -38,7 +38,7 @@ not part of the running game — see the tree/lake design note below.
 | 1 / 2 | Equip rifle / binoculars |
 | F | Eat a ration |
 | T | Build a campfire (costs 3 wood) |
-| G | Sleep until dawn (beside a lit fire, evening/night only) |
+| E (at a lit fire) | Open the cook/sleep wheel |
 | Esc | Pause (releases the mouse) |
 
 ## Gameplay loop
@@ -50,7 +50,10 @@ not part of the running game — see the tree/lake design note below.
 3. **Stats tick down** — hunger, thirst and energy drain over time; warmth
    drops hard at night and at altitude. Empty bars bleed health. Eat rations
    (F), drink at the lake halfway up the valley, and build a campfire (T)
-   before dark. Sleeping at a fire (G) skips to dawn and restores energy.
+   before dark. Press E beside a lit fire to open a cook/sleep wheel: Cook
+   (eat a ration for a bigger restore than raw, if you have one) or Sleep
+   (skips to first light — only available once it's dim enough out; burns
+   the fire down to embers).
 4. **Wolves** — three dens sit along the route. Wolves wander/sit near home,
    detect you at range (farther at night — watch for the eyes), close in at
    a run, then drop to a stalking creep right before lunging. Three rifle

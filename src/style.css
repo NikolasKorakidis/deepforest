@@ -218,6 +218,48 @@ html, body {
   transition: opacity 1.2s;
 }
 
+/* ---------------------------------------------------------- radial menu */
+#radial-menu {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(4, 6, 8, 0.55);
+  pointer-events: auto;
+  cursor: default;
+}
+
+.radial-wheel {
+  position: relative;
+  width: 260px;
+  height: 260px;
+  border-radius: 50%;
+  background: rgba(20, 18, 16, 0.92);
+  border: 2px solid rgba(216, 212, 200, 0.35);
+  box-shadow: 0 0 40px rgba(0, 0, 0, 0.6);
+}
+
+.radial-wedge {
+  position: absolute;
+  inset: 0;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.radial-wedge:not(.disabled):hover { background: rgba(232, 179, 74, 0.28); }
+.radial-wedge.disabled { cursor: not-allowed; opacity: 0.4; }
+
+.radial-label {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  font-size: 14px;
+  letter-spacing: 0.04em;
+  color: #e8e4d8;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
 /* --------------------------------------------------------------- screens */
 .screen {
   position: absolute;
