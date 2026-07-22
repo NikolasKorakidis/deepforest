@@ -2,8 +2,8 @@
 // (damage flash, cold vignette, binocular mask, rifle scope) and full-screen
 // menus (start / pause / death / end).
 
-import scopeReticleUrl from '../assets/textures/scope-reticle.png?url';
-import binocMaskUrl from '../assets/textures/binoculars-mask.png?url';
+import scopeReticleUrl from '../assets/textures/scope-reticle.svg?url';
+import binocMaskUrl from '../assets/textures/binoculars-mask.svg?url';
 
 const STAT_DEFS = [
   ['health', 'Health', '#c94f42'],

@@ -224,20 +224,23 @@ html, body {
 
 #scope-overlay .scope-vignette {
   position: absolute; inset: 0;
-  background: radial-gradient(circle at center, transparent 34%, #000 42%);
+  /* vmin lengths (not percentages) so the hole is a true circle sized the
+     same way relative to the viewport regardless of aspect ratio, and
+     scales in lockstep with #scope-reticle below (both vmin-based). */
+  background: radial-gradient(circle at center, transparent 30vmin, #000 38vmin);
 }
 
 #scope-reticle {
   position: absolute;
   top: 50%; left: 50%;
-  width: 68vh;
+  width: 66vmin;
   transform: translate(-50%, -50%);
 }
 
 #scope-range {
   position: absolute;
   left: 50%;
-  top: calc(50% + 23vh);
+  top: calc(50% + 34vmin);
   transform: translateX(-50%);
   color: #e0473c;
   font: 600 15px/1 'Courier New', monospace;

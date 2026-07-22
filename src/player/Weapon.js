@@ -277,6 +277,13 @@ export class Weapon {
     this.hud.setCrosshair(this.equipped === 'rifle' && !binocAim && !scopeView);
     this.hud.setScopeView(scopeView, scopeView ? this._rangefinder() : null);
 
+    // Hide the viewmodel itself while looking through a lens — real scopes
+    // only show what's down the barrel, not the gun body/scope housing
+    // blocking half the view; the 2D HUD overlay carries the whole "zoomed
+    // view" illusion once scoped/binoculars are up.
+    this.rifleGroup.visible = this.equipped === 'rifle' && !scopeView;
+    this.binocGroup.visible = this.equipped === 'binoculars' && !binocAim;
+
     // Animation state, by priority: reload > recovering-from-shot > walk > idle.
     if (this.ready) {
       if (this.reloadT > 0) {
