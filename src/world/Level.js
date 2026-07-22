@@ -119,7 +119,7 @@ export class Level {
     this.smokeX = hx + 0.4;
     this.smokeZ = hz;
 
-    this._buildHelicopterFire(hx, hz, groundY);
+    this._buildFlare(hx, hz, groundY);
 
     // Collision footprint (independent of the mesh — always present).
     this.grid.insert(hx, hz, 2.4);
@@ -127,63 +127,58 @@ export class Level {
     this.grid.insert(hx + 2.2, hz - 1.2, 1.4);
   }
 
-  /** The wreck is still burning — the only warm, moving light for a long
-   *  stretch of dark valley. Two flame clusters (body + tail) plus a
-   *  flickering point light, in the same style as CampfireSystem's flames
-   *  but bigger and angrier. Lights the crash clearing dramatically enough
-   *  to read as both a landmark and a "get moving" cue. */
-  _buildHelicopterFire(hx, hz, groundY) {
-    const spots = [
-      { x: hx + 0.4, z: hz, yBase: groundY, scale: 1.5 },      // main body
-      { x: hx - 3.3, z: hz + 0.7, yBase: groundY, scale: 0.9 }, // tail section
-    ];
+  /** A signal flare planted upright near the wreck — the only warm, moving
+   *  light for a long stretch of dark valley. Burns steadier than an open
+   *  fire (gentle flicker, not the wild cone-flame look), throws a bright
+   *  red light across the clearing and up the fuselage, and trails smoke.
+   *  Reads as both a landmark and a "someone was signaling for help" cue. */
+  _buildFlare(hx, hz, groundY) {
+    const fx = hx + 2.6, fz = hz + 1.4; // a few units clear of the fuselage
+    const fy = this._groundY(fx, fz);
 
-    this.fireFlames = [];
-    for (const spot of spots) {
-      const group = new THREE.Group();
-      group.position.set(spot.x, spot.yBase, spot.z);
+    const group = new THREE.Group();
+    group.position.set(fx, fy, fz);
+    group.rotation.set(0.22, 2.1, 0.16); // jammed into the ground at a lean
 
-      const outer = new THREE.Mesh(
-        new THREE.ConeGeometry(0.55 * spot.scale, 1.5 * spot.scale, 8),
-        new THREE.MeshBasicMaterial({
-          color: 0xff5a1e, transparent: true, opacity: 0.85,
-          blending: THREE.AdditiveBlending, depthWrite: false,
-        })
-      );
-      outer.position.y = 0.95 * spot.scale;
-      const inner = new THREE.Mesh(
-        new THREE.ConeGeometry(0.28 * spot.scale, 0.95 * spot.scale, 8),
-        new THREE.MeshBasicMaterial({
-          color: 0xffcf55, transparent: true, opacity: 0.9,
-          blending: THREE.AdditiveBlending, depthWrite: false,
-        })
-      );
-      inner.position.y = 0.85 * spot.scale;
-      const glow = makeGlowSprite(0xff7a33, 3.6 * spot.scale, 0.4);
-      glow.position.y = 1 * spot.scale;
-      group.add(outer, inner, glow);
-      this.scene.add(group);
-      this.fireFlames.push({ group, outer, inner, glow, phase: Math.random() * Math.PI * 2 });
+    const bodyMat = new THREE.MeshStandardMaterial({ color: 0x4a0d0d, roughness: 0.6 });
+    const body = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.03, 0.32, 8), bodyMat);
+    body.position.y = 0.16;
+    group.add(body);
+
+    const tipMat = new THREE.MeshStandardMaterial({
+      color: 0xff2010, emissive: 0xff2010, emissiveIntensity: 2.5, roughness: 0.3,
+    });
+    const tip = new THREE.Mesh(new THREE.SphereGeometry(0.035, 8, 8), tipMat);
+    tip.position.y = 0.34;
+    group.add(tip);
+    this.flareTipMat = tipMat;
+
+    this.flareGlow = makeGlowSprite(0xff2010, 2.6, 0.55);
+    this.flareGlow.position.set(fx, fy + 0.36, fz);
+    this.scene.add(this.flareGlow);
+
+    group.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+    this.scene.add(group);
+
+    // Raised a bit above the physical tip so it rakes evenly up the
+    // fuselage instead of just lighting the ground around the flare.
+    this.flareLight = new THREE.PointLight(0xff2010, 6, 45, 1.8);
+    this.flareLight.position.set(fx, fy + 1.2, fz);
+    this.scene.add(this.flareLight);
+
+    // Thin trail of dark, red-lit smoke — same drifting rig as the
+    // wreck's engine smoke, just sparser and tinted from the flare.
+    this.flareSmoke = [];
+    for (let i = 0; i < 8; i++) {
+      const s = makeGlowSprite(0x502420, 1.1, 0.2, false);
+      s.userData.phase = i / 8;
+      s.position.set(fx, fy, fz);
+      this.scene.add(s);
+      this.flareSmoke.push(s);
     }
-
-    // A strong, flickering firelight — warm against the cold moonlight. No
-    // shadow-casting (matches CampfireSystem's fire light): a shadow-casting
-    // point light is expensive for what it'd add here.
-    this.fireLight = new THREE.PointLight(0xff5a22, 5, 40, 1.7);
-    this.fireLight.position.set(hx + 0.4, groundY + 2.4, hz);
-    this.scene.add(this.fireLight);
-
-    // A handful of sparks/embers popping up out of the blaze.
-    this.embers = [];
-    for (let i = 0; i < 14; i++) {
-      const e = makeGlowSprite(0xffb655, 0.3, 0.8);
-      e.userData.phase = i / 14;
-      e.userData.spotX = spots[i % spots.length].x;
-      e.userData.spotZ = spots[i % spots.length].z;
-      this.scene.add(e);
-      this.embers.push(e);
-    }
-    this.fireBaseY = groundY;
+    this.flareBaseY = fy + 0.35;
+    this.flareX = fx;
+    this.flareZ = fz;
   }
 
   // --------------------------------------------------------------- pickups
@@ -542,27 +537,25 @@ export class Level {
     // checkpoint flag wave
     if (this.flag) this.flag.rotation.y = Math.sin(this.t * 2.2) * 0.35;
 
-    // helicopter fire: flicker the flames and the light together
-    if (this.fireLight) {
-      const flicker = Math.sin(this.t * 14) * 0.3 + Math.sin(this.t * 31 + 1.3) * 0.18
-        + Math.sin(this.t * 7.3) * 0.15;
-      this.fireLight.intensity = 5 + flicker * 1.8;
-      for (const f of this.fireFlames) {
-        const fl = Math.sin(this.t * 12 + f.phase) * 0.25 + Math.sin(this.t * 27 + f.phase) * 0.15;
-        const s = 1 + fl * 0.4;
-        f.outer.scale.set(s, 0.9 + fl * 0.5, s);
-        f.inner.scale.set(s, 1 + fl * 0.35, s);
-        f.glow.material.opacity = 0.4 + fl * 0.15;
-      }
-      for (const e of this.embers) {
-        const cycle = (this.t * 0.35 + e.userData.phase) % 1;
-        e.position.set(
-          e.userData.spotX + Math.sin(cycle * 11 + e.userData.phase * 30) * 1.4,
-          this.fireBaseY + cycle * 4.5,
-          e.userData.spotZ + Math.cos(cycle * 8 + e.userData.phase * 20) * 1.4
+    // signal flare: gentle, steady flicker — not the wild cone-flame look —
+    // plus its trail of drifting smoke.
+    if (this.flareLight) {
+      const flicker = Math.sin(this.t * 9) * 0.12 + Math.sin(this.t * 22 + 1.3) * 0.06;
+      this.flareLight.intensity = 6 + flicker;
+      this.flareTipMat.emissiveIntensity = 2.5 + flicker * 0.8;
+      this.flareGlow.material.opacity = 0.55 + flicker * 0.15;
+      const gs = 1 + flicker * 0.15;
+      this.flareGlow.scale.set(2.6 * gs, 2.6 * gs, 1);
+
+      for (const s of this.flareSmoke) {
+        const cycle = (this.t * 0.16 + s.userData.phase) % 1;
+        s.position.set(
+          this.flareX + Math.sin(cycle * 8 + s.userData.phase * 20) * 0.35,
+          this.flareBaseY + cycle * 4,
+          this.flareZ + Math.cos(cycle * 6) * 0.3
         );
-        e.material.opacity = 0.85 * (1 - cycle);
-        e.scale.setScalar(0.5 + (1 - cycle) * 0.6);
+        s.material.opacity = 0.2 * (1 - cycle);
+        s.scale.setScalar(0.8 + cycle * 2);
       }
     }
   }
