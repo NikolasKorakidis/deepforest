@@ -1,10 +1,18 @@
-// Tiny procedural sound effects via WebAudio — no audio assets needed.
-// Everything is synthesized: noise bursts, oscillator sweeps.
+import rifleShotUrl from '../assets/audio/sfx/rifleshot.wav?url';
+import rifleReloadUrl from '../assets/audio/sfx/riflereload.mp3?url';
+
+// Mostly procedural sound effects via WebAudio, with real recorded clips
+// layered in from src/assets/audio/sfx/ where available (currently the
+// rifle shot and reload). Clips are decoded once (kicked off in resume(),
+// same moment the AudioContext itself is created) and played back through
+// AudioBufferSourceNodes on the same master gain as everything else, so
+// volume/mixing stays consistent whether a sound is synthesized or a file.
 
 export class SFX {
   constructor() {
     this.ctx = null;
     this.master = null;
+    this.buffers = {}; // name -> decoded AudioBuffer, once loaded
   }
 
   /** Must be called from a user gesture before any sound plays. */
@@ -14,8 +22,34 @@ export class SFX {
       this.master = this.ctx.createGain();
       this.master.gain.value = 0.5;
       this.master.connect(this.ctx.destination);
+      this._loadBuffer('shot', rifleShotUrl);
+      this._loadBuffer('reload', rifleReloadUrl);
     }
     if (this.ctx.state === 'suspended') this.ctx.resume();
+  }
+
+  async _loadBuffer(name, url) {
+    try {
+      const res = await fetch(url);
+      const arrayBuffer = await res.arrayBuffer();
+      this.buffers[name] = await this.ctx.decodeAudioData(arrayBuffer);
+    } catch (err) {
+      console.error(`Failed to load sound "${name}" (${url}):`, err);
+    }
+  }
+
+  /** @returns true if a decoded clip played, false if it isn't loaded (yet) — callers fall back to a synthesized sound in that case. */
+  _playBuffer(name, { volume = 1, rate = 1 } = {}) {
+    const buffer = this.buffers[name];
+    if (!buffer) return false;
+    const src = this.ctx.createBufferSource();
+    src.buffer = buffer;
+    src.playbackRate.value = rate;
+    const g = this.ctx.createGain();
+    g.gain.value = volume;
+    src.connect(g).connect(this.master);
+    src.start();
+    return true;
   }
 
   _noise(duration) {
@@ -35,6 +69,10 @@ export class SFX {
 
   shot() {
     if (!this.ctx) return;
+    if (this._playBuffer('shot', { volume: 0.8 })) return;
+    // Fallback if rifleshot.wav hasn't finished decoding yet (fires almost
+    // instantly after resume(), so this only matters for a shot taken in
+    // the very first instant of play) or failed to load at all.
     const t = this.ctx.currentTime;
     const noise = this._noise(0.3);
     const lp = this.ctx.createBiquadFilter();
@@ -76,6 +114,9 @@ export class SFX {
   }
 
   reload() {
+    if (!this.ctx) return;
+    if (this._playBuffer('reload', { volume: 0.8 })) return;
+    // Fallback if riflereload.mp3 hasn't finished decoding yet or failed to load.
     this._blip(500, 0.05, 0.15, 'square');
     this._blip(400, 0.05, 0.15, 'square', 0.5);
     this._blip(750, 0.05, 0.2, 'square', 1.6);
