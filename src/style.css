@@ -230,6 +230,17 @@ html, body {
   background: radial-gradient(circle at center, transparent 30vmin, #000 38vmin);
 }
 
+/* Subtle lens shading inside the glass itself (real scopes darken and
+   slightly tint toward the tube wall) — separate from the hard outer
+   vignette cutoff above, sits just inside the same 30vmin visible radius. */
+#scope-overlay .scope-glass {
+  position: absolute; inset: 0;
+  background: radial-gradient(circle at center,
+    rgba(20, 28, 16, 0) 0%,
+    rgba(12, 16, 10, 0.35) 27vmin,
+    rgba(0, 0, 0, 0.6) 30vmin);
+}
+
 #scope-reticle {
   position: absolute;
   top: 50%; left: 50%;
@@ -237,15 +248,19 @@ html, body {
   transform: translate(-50%, -50%);
 }
 
+/* Digital rangefinder readout, tucked in the lower-right of the visible
+   glass rather than under the crosshair (that's now the BDC ladder). */
 #scope-range {
   position: absolute;
-  left: 50%;
-  top: calc(50% + 34vmin);
-  transform: translateX(-50%);
-  color: #e0473c;
-  font: 600 15px/1 'Courier New', monospace;
+  left: calc(50% + 18vmin);
+  top: calc(50% + 14vmin);
+  padding: 2px 6px;
+  border: 1px solid rgba(198, 122, 58, 0.5);
+  background: rgba(8, 10, 6, 0.45);
+  color: #c67a3a;
+  font: 600 13px/1 'Courier New', monospace;
   letter-spacing: 0.06em;
-  text-shadow: 0 0 4px rgba(0,0,0,0.9), 0 0 1px rgba(0,0,0,1);
+  text-shadow: 0 0 3px rgba(198, 122, 58, 0.5);
 }
 
 #fade {

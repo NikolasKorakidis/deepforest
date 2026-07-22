@@ -3,7 +3,7 @@
 // menus (start / pause / death / end).
 
 import scopeReticleUrl from '../assets/textures/scope-reticle.svg?url';
-import binocMaskUrl from '../assets/textures/binoculars-mask.svg?url';
+import binocMaskUrl from '../assets/textures/binoculars-mask.png?url';
 
 const STAT_DEFS = [
   ['health', 'Health', '#c94f42'],
@@ -37,6 +37,7 @@ export class HUD {
       <div id="binoc-mask" style="background-image:url(${binocMaskUrl})"></div>
       <div id="scope-overlay">
         <div class="scope-vignette"></div>
+        <div class="scope-glass"></div>
         <img id="scope-reticle" src="${scopeReticleUrl}" alt="" />
         <div id="scope-range"></div>
       </div>
