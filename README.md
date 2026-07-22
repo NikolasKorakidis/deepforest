@@ -11,7 +11,10 @@ The world is procedural or primitive-based and there are no audio files
 the crashed-helicopter model, an animated first-person hands+rifle rig (the
 held viewmodel), a simpler rifle model for the ground pickup only, the
 animated wolf, and a real low-poly tree model (forest + lake) — all in
-`src/assets/models/`, loaded at runtime with three.js's `GLTFLoader`.
+`src/assets/models/`, loaded at runtime with three.js's `GLTFLoader`. Two more
+external assets, a sniper crosshair and a binoculars mask, are 2D textures
+(`src/assets/textures/`) composited into the HUD rather than 3D models —
+see the aiming note below.
 
 ## Run it
 
@@ -33,7 +36,7 @@ not part of the running game — see the tree/lake design note below.
 | Shift | Sprint (drains energy) |
 | E | Interact / pick up |
 | LMB | Fire rifle (hip or aimed, animated) |
-| RMB (hold) | Aim down the scope; with binoculars equipped, long-range zoom |
+| RMB (hold) | Aim down the scope (crosshair + rangefinder once zoomed in); with binoculars equipped, long-range zoom |
 | R | Reload (quick or full, depending on how empty the mag is) |
 | 1 / 2 | Equip rifle / binoculars |
 | F | Eat a ration |
@@ -194,9 +197,19 @@ Design notes:
   repetition is a bit more noticeable than with the old fully-procedural
   (randomly proportioned) trees.
 - The rifle's scope is a solid modeled prop, not a functional see-through
-  lens (that would need a separate render-to-texture pass) — the HUD
-  crosshair dot is what you actually aim with, even while aiming down the
-  scope.
+  lens (that would need a separate render-to-texture pass). What sells the
+  aiming is a 2D HUD layer: once the RMB zoom-in tweens the camera to its
+  aimed FOV (`Weapon.js`'s `scopeView` flag — gated on the FOV having
+  actually settled, not on RMB going down, so the reticle doesn't pop in
+  mid-animation), a vector crosshair overlay fades in with a rangefinder
+  readout in meters (a dedicated raycast against the whole scene, separate
+  from the hitscan raycast so it doesn't disturb the rifle's actual range
+  limit). The crosshair and the binoculars' vignette mask are both real
+  stock vector art (`src/assets/textures/`) rather than CSS shapes; the
+  source files only ever encoded transparency as a baked-in checkerboard
+  placeholder graphic (a stock-preview convention, not real alpha), so both
+  were reprocessed offline (Ghostscript rasterize → numpy luminance-keyed
+  alpha) to get real transparent PNGs.
 
 ## Suggested next steps
 

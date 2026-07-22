@@ -1,6 +1,9 @@
 // DOM-based HUD: stat bars, ammo, compass strip, prompts, toasts, overlays
-// (damage flash, cold vignette, binocular mask) and full-screen menus
-// (start / pause / death / end).
+// (damage flash, cold vignette, binocular mask, rifle scope) and full-screen
+// menus (start / pause / death / end).
+
+import scopeReticleUrl from '../assets/textures/scope-reticle.png?url';
+import binocMaskUrl from '../assets/textures/binoculars-mask.png?url';
 
 const STAT_DEFS = [
   ['health', 'Health', '#c94f42'],
@@ -31,7 +34,12 @@ export class HUD {
       <div id="vignette"></div>
       <div id="cold-overlay"></div>
       <div id="damage-flash"></div>
-      <div id="binoc-mask"></div>
+      <div id="binoc-mask" style="background-image:url(${binocMaskUrl})"></div>
+      <div id="scope-overlay">
+        <div class="scope-vignette"></div>
+        <img id="scope-reticle" src="${scopeReticleUrl}" alt="" />
+        <div id="scope-range"></div>
+      </div>
       <div id="fade"></div>
 
       <div id="stats">
@@ -207,6 +215,12 @@ export class HUD {
 
   setBinocularMask(on) {
     this.el('binoc-mask').classList.toggle('active', on);
+  }
+
+  /** @param meters distance to whatever's dead-center in view, or null if nothing in range */
+  setScopeView(on, meters) {
+    this.el('scope-overlay').classList.toggle('active', on);
+    if (on) this.el('scope-range').textContent = meters != null ? `${meters} m` : '— m';
   }
 
   hitmarker() {

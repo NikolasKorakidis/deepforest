@@ -31,13 +31,14 @@ const HIP_POS = new THREE.Vector3(-0.075, -0.21, -0.055);
 const AIM_POS = new THREE.Vector3(0.055, -0.26, -0.025);
 
 export class Weapon {
-  constructor({ camera, input, controller, hud, sfx, getTargets }) {
+  constructor({ camera, input, controller, hud, sfx, getTargets, getWorld }) {
     this.camera = camera;
     this.input = input;
     this.controller = controller;
     this.hud = hud;
     this.sfx = sfx;
     this.getTargets = getTargets;
+    this.getWorld = getWorld;
 
     this.equipped = null; // 'rifle' | 'binoculars' | null
     this.hasRifle = false;
@@ -57,6 +58,12 @@ export class Weapon {
 
     this.raycaster = new THREE.Raycaster();
     this.raycaster.far = CONFIG.rifle.range;
+
+    // Separate raycaster for the scope's rangefinder readout: unlike the
+    // hitscan above, this checks distance to anything in the scene (not
+    // just wolves), so it needs its own far plane matching the camera's.
+    this.rangeRaycaster = new THREE.Raycaster();
+    this.rangeRaycaster.far = 900;
 
     this._buildViewmodels();
 
@@ -231,6 +238,15 @@ export class Weapon {
     this.sfx.reload();
   }
 
+  /** Distance in meters from the camera to whatever's dead-center in the scope, or null. */
+  _rangefinder() {
+    this.camera.updateMatrixWorld();
+    const targets = this.getWorld().children.filter((o) => o !== this.camera);
+    this.rangeRaycaster.setFromCamera({ x: 0, y: 0 }, this.camera);
+    const hits = this.rangeRaycaster.intersectObjects(targets, true);
+    return hits.length > 0 ? Math.round(hits[0].distance) : null;
+  }
+
   update(dt) {
     this.cooldown -= dt;
     this.shotT = Math.max(0, this.shotT - dt);
@@ -247,14 +263,19 @@ export class Weapon {
     // FOV zoom for aiming / binoculars.
     let targetFov = 70;
     const binocAim = this.aiming && this.equipped === 'binoculars';
-    if (this.aiming && this.equipped === 'rifle') targetFov = 52;
+    const rifleAim = this.aiming && this.equipped === 'rifle';
+    if (rifleAim) targetFov = 52;
     if (binocAim) targetFov = 18;
     if (Math.abs(this.camera.fov - targetFov) > 0.01) {
       this.camera.fov += (targetFov - this.camera.fov) * Math.min(1, dt * 10);
       this.camera.updateProjectionMatrix();
     }
+    // The scope view only appears once the zoom-in animation has actually
+    // settled on its target FOV, not the instant RMB goes down.
+    const scopeView = rifleAim && Math.abs(this.camera.fov - targetFov) < 0.5;
     this.hud.setBinocularMask(binocAim);
-    this.hud.setCrosshair(this.equipped === 'rifle' && !binocAim);
+    this.hud.setCrosshair(this.equipped === 'rifle' && !binocAim && !scopeView);
+    this.hud.setScopeView(scopeView, scopeView ? this._rangefinder() : null);
 
     // Animation state, by priority: reload > recovering-from-shot > walk > idle.
     if (this.ready) {
