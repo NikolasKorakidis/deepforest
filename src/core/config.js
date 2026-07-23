@@ -7,8 +7,12 @@ export const CONFIG = {
   player: {
     walkSpeed: 4.3,
     sprintSpeed: 6.6,
+    crouchSpeed: 2.4,
+    proneSpeed: 1.0,
     radius: 0.45,
     eyeHeight: 1.62,
+    crouchEyeHeight: 1.05,
+    proneEyeHeight: 0.45,
     lookSensitivity: 0.0021,
   },
 
@@ -40,6 +44,8 @@ export const CONFIG = {
     wanderSpeed: 1.7,
     detectRadiusDay: 24,
     detectRadiusNight: 30,
+    crouchDetectMult: 0.65, // sneaking narrows how far a wolf notices you
+    proneDetectMult: 0.4,
     giveUpRadius: 55,
     attackRange: 2.4,
     attackCooldown: 1.5,

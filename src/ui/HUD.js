@@ -76,6 +76,7 @@ export class HUD {
           Look for survivors. Scavenge what you can. Follow the path north.</p>
           <div class="controls">
             <span><b>WASD</b> move</span><span><b>Shift</b> sprint</span>
+            <span><b>C / Ctrl</b> crouch</span><span><b>Z</b> prone</span>
             <span><b>Mouse</b> look</span><span><b>E</b> interact</span>
             <span><b>LMB</b> fire</span><span><b>RMB</b> aim / zoom</span>
             <span><b>R</b> reload</span><span><b>1 / 2</b> rifle / binoculars</span>

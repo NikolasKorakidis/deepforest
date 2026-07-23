@@ -152,12 +152,16 @@ export class Game {
       altitude: this.controller.position.y,
     });
 
+    const stealthMult = this.controller.stance === 'prone' ? CONFIG.wolf.proneDetectMult
+      : this.controller.stance === 'crouch' ? CONFIG.wolf.crouchDetectMult
+      : 1;
     const wolfCtx = {
       playerPos: this.controller.position,
       stats: this.stats,
       env: this.env,
       sfx: this.sfx,
       hud: this.hud,
+      stealthMult,
     };
     for (const w of this.wolves) w.update(dt, wolfCtx);
 

@@ -23,8 +23,14 @@ export class PlayerController {
     this.speed2D = 0;
     this.lookDX = 0;
     this.lookDY = 0;
+    this.stance = 'stand'; // 'stand' | 'crouch' | 'prone'
+    this.eyeHeightCur = CONFIG.player.eyeHeight;
+    this.crouchToggled = false; // KeyC toggles; Ctrl still crouches only while held
+    this.proneToggled = false; // KeyZ toggles
 
     camera.rotation.order = 'YXZ';
+    input.onPress('KeyC', () => { this.crouchToggled = !this.crouchToggled; });
+    input.onPress('KeyZ', () => { this.proneToggled = !this.proneToggled; });
   }
 
   /** Kick from firing the rifle: pitch up + small random yaw. */
@@ -48,12 +54,24 @@ export class PlayerController {
     const s = (this.input.isDown('KeyD') ? 1 : 0) - (this.input.isDown('KeyA') ? 1 : 0);
     const moving = f !== 0 || s !== 0;
 
+    // Stance: Z (toggled by press) is the deepest, prone, and wins over
+    // crouch; crouch comes from either KeyC (also toggled) or Ctrl
+    // (crouches only while held). Standing is the only stance that can
+    // sprint.
+    const ctrlHeld = this.input.isDown('ControlLeft') || this.input.isDown('ControlRight');
+    this.stance = this.proneToggled ? 'prone'
+      : (this.crouchToggled || ctrlHeld) ? 'crouch'
+      : 'stand';
+
     const exhausted = this.stats.energy < 12;
     this.isSprinting =
-      moving && f > 0 && !exhausted &&
+      moving && f > 0 && !exhausted && this.stance === 'stand' &&
       (this.input.isDown('ShiftLeft') || this.input.isDown('ShiftRight'));
 
-    const speed = (this.isSprinting ? P.sprintSpeed : P.walkSpeed) * (exhausted ? 0.85 : 1);
+    let speed;
+    if (this.stance === 'prone') speed = P.proneSpeed;
+    else if (this.stance === 'crouch') speed = P.crouchSpeed;
+    else speed = (this.isSprinting ? P.sprintSpeed : P.walkSpeed) * (exhausted ? 0.85 : 1);
 
     const sinY = Math.sin(this.yaw), cosY = Math.cos(this.yaw);
     // yaw = 0 faces -Z (north)
@@ -90,7 +108,12 @@ export class PlayerController {
     const bobY = Math.sin(this.bobTime * 2) * 0.04 * bobAmt;
     const roll = Math.cos(this.bobTime) * 0.006 * bobAmt;
 
-    this.camera.position.set(nx, this.smoothY + P.eyeHeight + bobY, nz);
+    const targetEye = this.stance === 'prone' ? P.proneEyeHeight
+      : this.stance === 'crouch' ? P.crouchEyeHeight
+      : P.eyeHeight;
+    this.eyeHeightCur += (targetEye - this.eyeHeightCur) * Math.min(1, dt * 8);
+
+    this.camera.position.set(nx, this.smoothY + this.eyeHeightCur + bobY, nz);
     this.camera.rotation.set(this.pitch, this.yaw, roll);
   }
 }

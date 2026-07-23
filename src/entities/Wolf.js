@@ -160,7 +160,7 @@ export class Wolf {
     const W = CONFIG.wolf;
     const p = ctx.playerPos;
     const dist = Math.hypot(p.x - this.pos.x, p.z - this.pos.z);
-    const detectR = ctx.env.isNight ? W.detectRadiusNight : W.detectRadiusDay;
+    const detectR = (ctx.env.isNight ? W.detectRadiusNight : W.detectRadiusDay) * (ctx.stealthMult ?? 1);
 
     this.attackCd -= dt;
     this.alertCd -= dt;
