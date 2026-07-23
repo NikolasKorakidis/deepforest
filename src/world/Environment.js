@@ -7,15 +7,31 @@ import { smoothstep, lerp, clamp } from './heightfield.js';
 // 0.5 = noon).
 
 const DAY_SKY = new THREE.Color(0x8fb2d4);
-const NIGHT_SKY = new THREE.Color(0x05070f);
 const DUSK_TINT = new THREE.Color(0xd07a45);
 const SUN_LOW = new THREE.Color(0xff9a55);
 const SUN_HIGH = new THREE.Color(0xfff2df);
 const MOON_COLOR = new THREE.Color(0x93a7ce);
 const HEMI_DAY = new THREE.Color(0xbdd3e8);
-const HEMI_NIGHT = new THREE.Color(0x1a2440);
 const GROUND_DAY = new THREE.Color(0x3d4536);
-const GROUND_NIGHT = new THREE.Color(0x05070c);
+
+// Night lighting comes in two flavors, blended by `cloudCover` (0 = clear,
+// 1 = overcast). There's no weather system yet, so `cloudCover` is pinned to
+// 0 — a bright moonlit "clear" night — but the old, much darker "overcast"
+// numbers (what the whole game used to look like at night) are kept here
+// so a future cloud system can dial night brightness back down by raising
+// cloudCover instead of needing new constants.
+const NIGHT_SUN_INTENSITY_CLEAR = 0.7;
+const NIGHT_SUN_INTENSITY_OVERCAST = 0.22;
+const NIGHT_HEMI_INTENSITY_CLEAR = 0.4;
+const NIGHT_HEMI_INTENSITY_OVERCAST = 0.12;
+const NIGHT_FOG_DENSITY_CLEAR = 0.009;
+const NIGHT_FOG_DENSITY_OVERCAST = 0.016;
+const NIGHT_SKY_CLEAR = new THREE.Color(0x1c2740);
+const NIGHT_SKY_OVERCAST = new THREE.Color(0x05070f);
+const HEMI_NIGHT_CLEAR = new THREE.Color(0x4a5c82);
+const HEMI_NIGHT_OVERCAST = new THREE.Color(0x1a2440);
+const GROUND_NIGHT_CLEAR = new THREE.Color(0x232b22);
+const GROUND_NIGHT_OVERCAST = new THREE.Color(0x05070c);
 
 export class Environment {
   constructor(scene) {
@@ -23,6 +39,12 @@ export class Environment {
     this.time = CONFIG.startTimeOfDay;
     this.day = 1;
     this.daylight = 1;
+    this.cloudCover = 0; // 0 = clear moonlit night, 1 = overcast/pitch dark
+
+    // Scratch colors for the night clear/overcast blend, reused every frame.
+    this._nightSky = new THREE.Color();
+    this._nightHemi = new THREE.Color();
+    this._nightGround = new THREE.Color();
 
     this.hemi = new THREE.HemisphereLight(0xbdd3e8, 0x3d4536, 0.6);
     scene.add(this.hemi);
@@ -139,7 +161,8 @@ export class Environment {
     const azim = Math.cos(ang);
     this.daylight = smoothstep(-0.04, 0.28, elev);
 
-    // Sun by day, a fixed dim moon by night.
+    // Sun by day, a fixed moon by night (brightness/color set by cloudCover).
+    const nightSunIntensity = lerp(NIGHT_SUN_INTENSITY_CLEAR, NIGHT_SUN_INTENSITY_OVERCAST, this.cloudCover);
     if (elev > -0.04) {
       const dir = new THREE.Vector3(azim * 0.9, Math.max(elev, 0.02), -0.4).normalize();
       this.sun.position.copy(playerPos).addScaledVector(dir, 150);
@@ -147,24 +170,31 @@ export class Environment {
       this.sun.color.copy(SUN_LOW).lerp(SUN_HIGH, smoothstep(0.02, 0.45, elev));
     } else {
       this.sun.position.set(playerPos.x + 40, playerPos.y + 70, playerPos.z + 25);
-      this.sun.intensity = 0.22;
+      this.sun.intensity = nightSunIntensity;
       this.sun.color.copy(MOON_COLOR);
     }
     this.sun.target.position.copy(playerPos);
 
-    this.hemi.intensity = 0.12 + 0.5 * this.daylight;
-    this.hemi.color.copy(HEMI_NIGHT).lerp(HEMI_DAY, this.daylight);
-    this.hemi.groundColor.copy(GROUND_NIGHT).lerp(GROUND_DAY, this.daylight);
+    const nightHemiIntensity = lerp(NIGHT_HEMI_INTENSITY_CLEAR, NIGHT_HEMI_INTENSITY_OVERCAST, this.cloudCover);
+    this._nightHemi.copy(HEMI_NIGHT_CLEAR).lerp(HEMI_NIGHT_OVERCAST, this.cloudCover);
+    this._nightGround.copy(GROUND_NIGHT_CLEAR).lerp(GROUND_NIGHT_OVERCAST, this.cloudCover);
+    this.hemi.intensity = nightHemiIntensity + 0.5 * this.daylight;
+    this.hemi.color.copy(this._nightHemi).lerp(HEMI_DAY, this.daylight);
+    this.hemi.groundColor.copy(this._nightGround).lerp(GROUND_DAY, this.daylight);
 
     // Sky with a warm tint near sunrise/sunset.
-    this.skyColor.copy(NIGHT_SKY).lerp(DAY_SKY, this.daylight);
+    this._nightSky.copy(NIGHT_SKY_CLEAR).lerp(NIGHT_SKY_OVERCAST, this.cloudCover);
+    this.skyColor.copy(this._nightSky).lerp(DAY_SKY, this.daylight);
     const duskAmt = clamp(1 - Math.abs(elev) * 4, 0, 1) * clamp(this.daylight * 2, 0, 1) * 0.55;
     this.skyColor.lerp(DUSK_TINT, duskAmt);
 
     this.scene.fog.color.copy(this.skyColor);
-    this.scene.fog.density = lerp(0.016, 0.0065, this.daylight);
+    const nightFogDensity = lerp(NIGHT_FOG_DENSITY_CLEAR, NIGHT_FOG_DENSITY_OVERCAST, this.cloudCover);
+    this.scene.fog.density = lerp(nightFogDensity, 0.0065, this.daylight);
 
-    this.stars.material.opacity = 1 - this.daylight;
+    // Clouds (once they exist) hide stars and the moon, not just dim them.
+    const nightVisibility = (1 - this.daylight) * (1 - this.cloudCover);
+    this.stars.material.opacity = nightVisibility;
     this.stars.position.set(playerPos.x, 0, playerPos.z);
 
     const moonDist = 620;
@@ -173,6 +203,6 @@ export class Environment {
       this.moonDir.y * moonDist,
       playerPos.z + this.moonDir.z * moonDist
     );
-    this.moon.material.opacity = 1 - this.daylight;
+    this.moon.material.opacity = nightVisibility;
   }
 }
