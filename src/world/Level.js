@@ -3,6 +3,7 @@ import {
   terrainHeight, pathX, hash2, POND, POND_RADIUS, POND_WATER_Y, CHECKPOINT,
 } from './heightfield.js';
 import { makeGlowSprite } from '../core/glow.js';
+import { makeSmokeSprite, makeSparkSprite } from '../core/particleTextures.js';
 import { loadGLTF, normalizeModel } from '../core/assets.js';
 import { loadTreeAssets } from './TreeAssets.js';
 import { createWaterMaterial, updateWaterMaterial } from './Water.js';
@@ -116,7 +117,7 @@ export class Level {
 
     // Smoke rising from the wreck (synchronous).
     for (let i = 0; i < 10; i++) {
-      const s = makeGlowSprite(0x2a2a2a, 1.7, 0.28, false);
+      const s = makeSmokeSprite(0x2a2a2a, 1.7, 0.28);
       s.userData.phase = i / 10;
       s.position.set(hx + 0.4, 0, hz);
       this.scene.add(s);
@@ -364,7 +365,7 @@ export class Level {
     this._beaconSmokeHigh = new THREE.Color(0xff6a3a);
     this.beaconSmoke = [];
     for (let i = 0; i < 10; i++) {
-      const s = makeGlowSprite(0x4a2420, 1.3, 0.24, false);
+      const s = makeSmokeSprite(0x4a2420, 1.3, 0.24);
       s.userData.phase = i / 10;
       s.position.set(bx, by, bz);
       this.scene.add(s);
@@ -373,6 +374,17 @@ export class Level {
     this.beaconBaseY = by + 0.35;
     this.beaconX = bx;
     this.beaconZ = bz;
+
+    // Sparks spitting off the flare tip — small, fast, additive twinkles
+    // rather than the smoke's slow rising fade.
+    this.beaconSparks = [];
+    for (let i = 0; i < 5; i++) {
+      const s = makeSparkSprite(0.16, 0);
+      s.userData.seed = Math.random() * 10;
+      s.position.set(bx, by + 0.34, bz);
+      this.scene.add(s);
+      this.beaconSparks.push(s);
+    }
   }
 
   _updateBeacon() {
@@ -399,6 +411,18 @@ export class Level {
       s.material.color.copy(this._beaconSmokeLow).lerp(this._beaconSmokeHigh, pulse * nearSource);
       s.material.opacity = (0.18 + pulse * 0.12 * nearSource) * (1 - cycle * 0.7);
       s.scale.setScalar(0.9 + cycle * 2.2);
+    }
+
+    // Sparks: mostly dark, briefly flaring bright as they drift off the tip.
+    for (const sp of this.beaconSparks) {
+      const cycle = (this.t * 0.6 + sp.userData.seed) % 1;
+      sp.position.set(
+        this.beaconX + Math.sin(sp.userData.seed * 3) * 0.06 + cycle * Math.cos(sp.userData.seed) * 0.35,
+        this.beaconBaseY + cycle * 0.9,
+        this.beaconZ + Math.cos(sp.userData.seed * 5) * 0.06 + cycle * Math.sin(sp.userData.seed) * 0.35
+      );
+      const twinkle = Math.max(0, Math.sin(this.t * 9 + sp.userData.seed * 13));
+      sp.material.opacity = twinkle * (1 - cycle) * 0.9;
     }
   }
 

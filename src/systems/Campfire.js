@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { CONFIG } from '../core/config.js';
 import { terrainHeight } from '../world/heightfield.js';
 import { makeGlowSprite } from '../core/glow.js';
+import { makeFireSprite, makeSmokeSprite } from '../core/particleTextures.js';
 
 // Campfires: built anywhere on open ground for wood. A lit fire radiates
 // warmth in a radius; pressing E beside a lit one opens a menu (handled by
@@ -55,33 +56,34 @@ export class CampfireSystem {
       log.position.y = 0.15;
       group.add(log);
     }
-    // flame cones (additive) + glow + light
-    const flameOuter = new THREE.Mesh(
-      new THREE.ConeGeometry(0.32, 0.85, 8),
-      new THREE.MeshBasicMaterial({
-        color: 0xff7722, transparent: true, opacity: 0.85,
-        blending: THREE.AdditiveBlending, depthWrite: false,
-      })
-    );
-    flameOuter.position.y = 0.55;
-    const flameInner = new THREE.Mesh(
-      new THREE.ConeGeometry(0.16, 0.55, 8),
-      new THREE.MeshBasicMaterial({
-        color: 0xffdd66, transparent: true, opacity: 0.9,
-        blending: THREE.AdditiveBlending, depthWrite: false,
-      })
-    );
-    flameInner.position.y = 0.5;
+    // flame billboards (sprites always face the camera, so a soft outer
+    // tongue + a brighter inner core reads as real fire from any angle,
+    // unlike the flat-looking cone meshes this replaced) + glow + light
+    const flameOuter = makeFireSprite(1.05, 0.9);
+    flameOuter.position.y = 0.42;
+    const flameInner = makeFireSprite(0.6, 0.95);
+    flameInner.position.y = 0.32;
     const glow = makeGlowSprite(0xff8833, 2.2, 0.35);
     glow.position.y = 0.6;
     const light = new THREE.PointLight(0xff7722, 2.4, 16, 1.6);
     light.position.y = 0.8;
     group.add(flameOuter, flameInner, glow, light);
 
+    // Rising smoke, same technique as the wreck/beacon in Level.js.
+    const smoke = [];
+    for (let i = 0; i < 6; i++) {
+      const s = makeSmokeSprite(0x333333, 0.9, 0.22);
+      s.userData.phase = i / 6;
+      s.position.set(x, y, z);
+      this.scene.add(s);
+      smoke.push(s);
+    }
+
     this.scene.add(group);
     const fire = {
-      group, flameOuter, flameInner, glow, light,
+      group, flameOuter, flameInner, glow, light, smoke,
       pos: new THREE.Vector3(x, y, z),
+      baseY: y + 0.5,
       fuel: CONFIG.fire.burnTimeSec,
     };
     this.fires.push(fire);
@@ -113,6 +115,7 @@ export class CampfireSystem {
         f.flameInner.visible = false;
         f.glow.visible = false;
         f.light.intensity = 0;
+        for (const s of f.smoke) s.visible = false;
         hud.toast('A campfire has burned out.');
         continue;
       }
@@ -122,7 +125,21 @@ export class CampfireSystem {
       const s = 1 + flicker * 0.4;
       f.flameOuter.scale.set(s, 0.9 + flicker * 0.5, s);
       f.flameInner.scale.set(s, 1 + flicker * 0.3, s);
+      f.flameOuter.material.rotation = Math.sin(this.t * 3 + f.pos.x) * 0.15;
+      f.flameInner.material.rotation = Math.sin(this.t * 4.2 + f.pos.z) * 0.2;
       f.glow.material.opacity = 0.3 + flicker * 0.1;
+
+      // Rising smoke, same loop-and-fade technique as the wreck/beacon.
+      for (const sp of f.smoke) {
+        const cycle = (this.t * 0.1 + sp.userData.phase) % 1;
+        sp.position.set(
+          f.pos.x + Math.sin(cycle * 7 + sp.userData.phase * 20) * 0.25,
+          f.baseY + cycle * 2.6,
+          f.pos.z + Math.cos(cycle * 5) * 0.2
+        );
+        sp.material.opacity = 0.22 * (1 - cycle);
+        sp.scale.setScalar(0.7 + cycle * 1.6);
+      }
 
       if (f.pos.distanceTo(playerPos) < CONFIG.fire.warmRadius) this.nearFire = true;
     }
