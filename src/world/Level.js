@@ -9,6 +9,7 @@ import { loadTreeAssets } from './TreeAssets.js';
 import { createWaterMaterial, updateWaterMaterial } from './Water.js';
 import helicopterUrl from '../assets/models/helicopter_crashed.glb?url';
 import rifleUrl from '../assets/models/rifle.glb?url';
+import woodPileUrl from '../assets/models/wood_pile.glb?url';
 
 const BASE_LAKE_TREE_HEIGHT = 7; // slightly taller than the ambient forest for a set-piece feel
 
@@ -427,8 +428,19 @@ export class Level {
   }
 
   // ------------------------------------------------------------- wood/loot
+  _makeWoodPileProp() {
+    const g = new THREE.Group();
+    g.rotation.y = Math.random() * Math.PI * 2;
+    loadGLTF(woodPileUrl)
+      .then((gltf) => {
+        const model = normalizeModel(gltf.scene.clone(true), 1.2);
+        g.add(model);
+      })
+      .catch((err) => console.error('Failed to load wood pile model:', err));
+    return g;
+  }
+
   _placeWood() {
-    const logMat = new THREE.MeshStandardMaterial({ color: 0x4a3826, roughness: 1 });
     const spots = [
       [pathX(6) + 5, 6], [pathX(-14) - 5, -14],
       [pathX(-42) + 4, -42], [pathX(-72) - 5, -72],
@@ -436,15 +448,8 @@ export class Level {
       [pathX(-192) + 4, -192], [pathX(-228) - 4, -228],
     ];
     for (const [x, z] of spots) {
-      const g = new THREE.Group();
-      const log = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.12, 1.3, 6), logMat);
-      log.rotation.set(Math.PI / 2, 0, Math.random() * Math.PI);
-      const branch = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.06, 0.9, 5), logMat);
-      branch.rotation.set(Math.PI / 2, 0, Math.random() * Math.PI);
-      branch.position.set(0.25, 0.05, 0.2);
-      g.add(log, branch);
-      this._addPickup(g, x, z, 'Gather firewood (+2 wood)',
-        () => { this.inventory.wood += 2; }, { glowColor: 0xd8b475 });
+      this._addPickup(this._makeWoodPileProp(), x, z, 'Gather firewood (+2 wood)',
+        () => { this.inventory.wood += 2; }, { yOffset: 0, glowColor: 0xd8b475 });
     }
   }
 

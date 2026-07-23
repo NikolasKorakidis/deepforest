@@ -6,14 +6,15 @@ hungry — and must follow the valley north to a trail marker while managing
 survival stats, building fires to get through the freezing nights, and
 surviving the wolves.
 
-The world is procedural or primitive-based and there are no audio files
-(sound effects are synthesized with WebAudio). Five external assets are used —
-the crashed-helicopter model, an animated first-person hands+rifle rig (the
-held viewmodel), a simpler rifle model for the ground pickup only, the
-animated wolf, and a real low-poly tree model (forest + lake) — all in
-`src/assets/models/`, loaded at runtime with three.js's `GLTFLoader`. Two more
-external assets, a sniper crosshair and a binoculars mask, are 2D textures
-(`src/assets/textures/`) composited into the HUD rather than 3D models —
+The world is mostly procedural or primitive-based, with a growing number of
+real external assets. In `src/assets/models/`, loaded at runtime with
+three.js's `GLTFLoader`: the crashed-helicopter model, an animated
+first-person hands+rifle rig (the held viewmodel), a simpler rifle model for
+the ground pickup only, the animated wolf, a real low-poly tree model (forest
++ lake), and a wood pile that replaced the old primitive log/branch mesh for
+gatherable firewood. Two more external assets, a sniper crosshair and a
+binoculars mask, are 2D textures (`src/assets/textures/`) composited into the
+HUD rather than 3D models —
 see the aiming note below.
 
 ## Run it
@@ -78,7 +79,7 @@ src/
     glow.js               shared glow-sprite texture helper
     assets.js             async GLTF loader + model normalize (scale/ground/shadows)
   assets/
-    models/               .glb models (crashed helicopter, rifle, wolf, tree_assets)
+    models/               .glb models (crashed helicopter, rifle, wolf, tree_assets, wood_pile)
   world/
     heightfield.js        the terrain function — single source of truth for ground height
     Terrain.js            terrain mesh + vertex-color painting
