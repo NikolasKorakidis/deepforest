@@ -75,6 +75,12 @@ export class Weapon {
     this.bullets = [];
     this.impacts = [];
     this.bulletRaycaster = new THREE.Raycaster();
+    // Sprite.raycast() throws if raycaster.camera isn't set (it needs it to
+    // compute the billboard's facing) — setFromCamera() sets this for us
+    // automatically, but .set(origin, direction) (what bullets use, since
+    // they don't originate from the camera) does not, and the scene is full
+    // of sprites (glow/fire/smoke/spark/moon). Set it once explicitly.
+    this.bulletRaycaster.camera = this.camera;
 
     // Separate raycaster for the scope's rangefinder readout: checks
     // distance to anything in the scene (not just wolves), so it needs its
