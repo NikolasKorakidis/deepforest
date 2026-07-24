@@ -56,17 +56,21 @@ export class PlayerController {
 
     // Stance: Z (toggled by press) is the deepest, prone, and wins over
     // crouch; crouch comes from either KeyC (also toggled) or Ctrl
-    // (crouches only while held). Standing is the only stance that can
-    // sprint.
+    // (crouches only while held). Sprinting always wins over both — Shift
+    // pops you up to standing (without untoggling crouch/prone, so you
+    // settle back into them once you stop sprinting) since you can't
+    // actually run while crouched or prone.
     const ctrlHeld = this.input.isDown('ControlLeft') || this.input.isDown('ControlRight');
-    this.stance = this.proneToggled ? 'prone'
+    const shiftHeld = this.input.isDown('ShiftLeft') || this.input.isDown('ShiftRight');
+    const exhausted = this.stats.energy < 12;
+    const wantsSprint = moving && f > 0 && !exhausted && shiftHeld;
+
+    this.stance = wantsSprint ? 'stand'
+      : this.proneToggled ? 'prone'
       : (this.crouchToggled || ctrlHeld) ? 'crouch'
       : 'stand';
 
-    const exhausted = this.stats.energy < 12;
-    this.isSprinting =
-      moving && f > 0 && !exhausted && this.stance === 'stand' &&
-      (this.input.isDown('ShiftLeft') || this.input.isDown('ShiftRight'));
+    this.isSprinting = wantsSprint;
 
     let speed;
     if (this.stance === 'prone') speed = P.proneSpeed;

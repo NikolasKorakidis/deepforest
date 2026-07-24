@@ -34,7 +34,7 @@ not part of the running game — see the tree/lake design note below.
 | Key | Action |
 | --- | --- |
 | WASD / Mouse | Move / look (click to capture the mouse) |
-| Shift | Sprint (drains energy; only while standing) |
+| Shift | Sprint (drains energy; forces you up out of crouch/prone) |
 | C (toggle) / Ctrl (hold) | Crouch — slower, lower camera, narrows wolf detection range |
 | Z (toggle) | Prone — slower still, lowest profile, narrows wolf detection range the most |
 | E | Interact / pick up |
