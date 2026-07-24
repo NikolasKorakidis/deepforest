@@ -68,7 +68,14 @@ export class HUD {
         <div class="radial-wheel" id="radial-wheel"></div>
       </div>
 
-      <div id="start-screen" class="screen">
+      <div id="loading-screen" class="screen loading">
+        <div class="panel">
+          <h1>DEEP FOREST</h1>
+          <p class="begin" id="loading-text">Loading…</p>
+        </div>
+      </div>
+
+      <div id="start-screen" class="screen hidden">
         <div class="panel">
           <h1>DEEP FOREST</h1>
           <p class="story">The helicopter went down in the dark. It's still burning.<br>
@@ -314,6 +321,17 @@ export class HUD {
   }
 
   // --------------------------------------------------------------- screens
+  setLoadingProgress({ loaded, total }) {
+    this.el('loading-text').textContent = total > 0 ? `Loading… ${loaded}/${total}` : 'Loading…';
+  }
+
+  /** Swaps the loading screen out for the real start screen — called once
+   *  every requested asset has settled (see Game.js / assets.js). */
+  hideLoading() {
+    this.el('loading-screen').classList.add('hidden');
+    this.el('start-screen').classList.remove('hidden');
+  }
+
   /**
    * @param hasSave    if true, shows Continue/New Game buttons instead of
    *   the plain "click anywhere to begin" panel.

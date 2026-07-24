@@ -9,13 +9,34 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 const loader = new GLTFLoader();
 const cache = new Map();
 
+// Every in-flight load is tracked here so Game.js can hold the start screen
+// behind a real "everything's actually loaded" promise instead of letting
+// the player click in while models are still placeholders (or, on a broken
+// deploy, silently stay placeholders forever).
+const pending = new Set();
+let totalRequested = 0;
+
 export function loadGLTF(url) {
   if (!cache.has(url)) {
-    cache.set(url, new Promise((resolve, reject) => {
+    totalRequested++;
+    const promise = new Promise((resolve, reject) => {
       loader.load(url, resolve, undefined, reject);
-    }));
+    });
+    pending.add(promise);
+    promise.finally(() => pending.delete(promise));
+    cache.set(url, promise);
   }
   return cache.get(url);
+}
+
+/** Resolves once every GLTF requested so far has settled — loaded OR
+ *  failed, so one broken/404 asset can't hang this forever. */
+export function allAssetsSettled() {
+  return Promise.allSettled([...pending]);
+}
+
+export function loadProgress() {
+  return { loaded: totalRequested - pending.size, total: totalRequested };
 }
 
 /**

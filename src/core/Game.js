@@ -17,6 +17,7 @@ import { Inventory } from '../items/Inventory.js';
 import { HUD } from '../ui/HUD.js';
 import { clamp } from '../world/heightfield.js';
 import { saveGame, loadGame, clearSave } from './save.js';
+import { allAssetsSettled, loadProgress } from './assets.js';
 
 // Orchestrator: owns the renderer/scene/camera and every game system,
 // drives the fixed update -> render loop, and handles the meta state
@@ -106,32 +107,54 @@ export class Game {
     this.stats.onDamaged = () => this.hud.damageFlash();
 
     // --- meta state ---
-    this.state = 'start';
+    this.state = 'loading';
     this.elapsed = 0;
     this.warnCooldowns = new Map();
 
-    this.hud.showStart({
-      hasSave: !!this.pendingSave,
-      onBegin: () => {
-        this.sfx.resume();
-        this.input.lock();
-        this.state = 'playing';
-        this.hud.setObjective('Look for survivors');
-        this.hud.toast('Your head pounds. The helicopter still burns behind you.', 5000);
-        setTimeout(() => this.hud.toast('No one answers your calls. Search the crash site.', 5000), 4000);
-        setTimeout(() => this.hud.toast('Then follow the valley north — into the dark.', 5000), 8500);
-      },
-      onContinue: () => {
-        this.sfx.resume();
-        this.input.lock();
-        this.applySave(this.pendingSave);
-        this.state = 'playing';
-        this.hud.toast('Welcome back.');
-      },
-      onNewGame: () => {
-        clearSave();
-        location.reload();
-      },
+    // Hold the start screen behind real asset readiness — every GLTF
+    // requested during construction above (helicopter, rifle, wood pile,
+    // fps hands, tree_assets) is tracked in core/assets.js. Without this,
+    // "click to begin" was available instantly, so a slow connection (or a
+    // broken deploy where assets 404) meant playing against placeholder
+    // boxes with no trees, forever, with no indication anything was wrong.
+    // Raced against a timeout so one hung/never-settling request can't
+    // block the game forever either.
+    const timeout = new Promise((resolve) => setTimeout(resolve, 20000));
+    Promise.race([allAssetsSettled(), timeout]).then((result) => {
+      const failed = Array.isArray(result) ? result.filter((r) => r.status === 'rejected').length : 0;
+      const { loaded, total } = loadProgress();
+      if (failed > 0) {
+        console.error(`${failed} asset(s) failed to load — see errors above. Continuing with placeholders.`);
+        this.hud.toast('Some assets failed to load — check your connection.', 6000);
+      } else if (loaded < total) {
+        console.error(`Gave up waiting on ${total - loaded} asset(s) after 20s — continuing with placeholders.`);
+        this.hud.toast('Some assets are taking too long to load — continuing anyway.', 6000);
+      }
+      this.state = 'start';
+      this.hud.hideLoading();
+      this.hud.showStart({
+        hasSave: !!this.pendingSave,
+        onBegin: () => {
+          this.sfx.resume();
+          this.input.lock();
+          this.state = 'playing';
+          this.hud.setObjective('Look for survivors');
+          this.hud.toast('Your head pounds. The helicopter still burns behind you.', 5000);
+          setTimeout(() => this.hud.toast('No one answers your calls. Search the crash site.', 5000), 4000);
+          setTimeout(() => this.hud.toast('Then follow the valley north — into the dark.', 5000), 8500);
+        },
+        onContinue: () => {
+          this.sfx.resume();
+          this.input.lock();
+          this.applySave(this.pendingSave);
+          this.state = 'playing';
+          this.hud.toast('Welcome back.');
+        },
+        onNewGame: () => {
+          clearSave();
+          location.reload();
+        },
+      });
     });
 
     this.input.onLockChange((locked) => {
@@ -155,6 +178,7 @@ export class Game {
   frame() {
     const dt = Math.min(0.05, this.clock.getDelta());
     if (this.state === 'playing') this.update(dt);
+    if (this.state === 'loading') this.hud.setLoadingProgress(loadProgress());
     this.level.update(dt); // ambient animation keeps running on menus
     this.renderer.render(this.scene, this.camera);
   }
