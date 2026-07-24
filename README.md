@@ -40,7 +40,7 @@ not part of the running game — see the tree/lake design note below.
 | E | Interact / pick up |
 | LMB | Fire rifle (hip or aimed, animated) |
 | RMB (toggle) | Aim down the scope (crosshair + rangefinder once zoomed in, with sway — steadier crouched or prone); with binoculars equipped, long-range zoom |
-| R | Reload (quick or full, depending on how empty the mag is) |
+| R | Reload (quick or full, depending on how empty the mag is; drops you out of the scope so you can see it) |
 | 1 / 2 | Equip rifle / binoculars |
 | F | Eat a ration |
 | T | Build a campfire (costs 3 wood) |

@@ -328,6 +328,10 @@ export class Weapon {
       this.hud.toast('No spare ammunition.');
       return;
     }
+    // Drop out of the scope/binoculars view — the reload plays out on the
+    // visible viewmodel, which is hidden while looking through a lens.
+    this.aiming = false;
+
     const animName = this.magAmmo === 0 ? 'reloadFull' : 'reload';
     const action = this.actions[animName];
     this.reloadT = action ? action.getClip().duration : CONFIG.rifle.reloadTimeFallback;
