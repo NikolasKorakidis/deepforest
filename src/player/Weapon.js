@@ -2,13 +2,28 @@ import * as THREE from 'three';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
 import { CONFIG } from '../core/config.js';
 import { makeGlowSprite } from '../core/glow.js';
+import { makeSparkSprite } from '../core/particleTextures.js';
 import { loadGLTF } from '../core/assets.js';
 import fpsHandsUrl from '../assets/models/fps_hands.glb?url';
 
 // Rifle + binoculars: the rifle viewmodel is a rigged hands+weapon GLB
 // driven by its own authored animation clips (idle/walk/shoot/reload)
 // rather than hand-rolled sway/bob math; binoculars stay a simple
-// primitive. Hitscan shooting via raycast, ammo/reload.
+// primitive. Firing launches a real (if exaggerated) ballistic projectile
+// — see _updateBullets — rather than an instant hitscan, so shots actually
+// drop in flight and the scope's BDC ladder means something.
+
+/** First hit that's actually solid geometry — `intersectObjects` happily
+ *  reports hits against decorative Sprite/Points objects (glow sprites,
+ *  fire/smoke/spark billboards, the moon, stars), which aren't real
+ *  surfaces a bullet (or the rangefinder) should stop at. Results are
+ *  distance-sorted, so this is just "skip the non-solid ones". */
+function firstSolidHit(hits) {
+  for (const hit of hits) {
+    if (!hit.object.isSprite && !hit.object.isPoints) return hit;
+  }
+  return null;
+}
 
 // Clip names as authored in the GLB.
 const CLIPS = {
@@ -31,13 +46,12 @@ const HIP_POS = new THREE.Vector3(-0.075, -0.21, -0.055);
 const AIM_POS = new THREE.Vector3(0.055, -0.26, -0.025);
 
 export class Weapon {
-  constructor({ camera, input, controller, hud, sfx, getTargets, getWorld }) {
+  constructor({ camera, input, controller, hud, sfx, getWorld }) {
     this.camera = camera;
     this.input = input;
     this.controller = controller;
     this.hud = hud;
     this.sfx = sfx;
-    this.getTargets = getTargets;
     this.getWorld = getWorld;
 
     this.equipped = null; // 'rifle' | 'binoculars' | null
@@ -56,12 +70,15 @@ export class Weapon {
     this.currentAnim = null;
     this.ready = false;
 
-    this.raycaster = new THREE.Raycaster();
-    this.raycaster.far = CONFIG.rifle.range;
+    // In-flight projectiles (see tryFire/_updateBullets) and their impact
+    // spark effects (see _spawnImpact/_updateImpacts).
+    this.bullets = [];
+    this.impacts = [];
+    this.bulletRaycaster = new THREE.Raycaster();
 
-    // Separate raycaster for the scope's rangefinder readout: unlike the
-    // hitscan above, this checks distance to anything in the scene (not
-    // just wolves), so it needs its own far plane matching the camera's.
+    // Separate raycaster for the scope's rangefinder readout: checks
+    // distance to anything in the scene (not just wolves), so it needs its
+    // own far plane matching the camera's.
     this.rangeRaycaster = new THREE.Raycaster();
     this.rangeRaycaster.far = 900;
 
@@ -206,19 +223,92 @@ export class Weapon {
       this._playAnim(shotAnim, 0.05);
     }
 
-    // World matrices are normally refreshed during render, i.e. one frame
-    // behind by the time we fire — sync them so the ray matches the view.
+    // Launch the actual projectile (world matrices are normally refreshed
+    // during render, i.e. one frame behind by the time we fire — sync them
+    // so the initial direction matches what's on screen).
     this.camera.updateMatrixWorld();
-    const targets = this.getTargets();
-    for (const t of targets) t.updateMatrixWorld(true);
-    this.raycaster.setFromCamera({ x: 0, y: 0 }, this.camera);
-    const hits = this.raycaster.intersectObjects(targets, true);
-    if (hits.length > 0) {
-      let obj = hits[0].object;
-      while (obj && !obj.userData.wolfRef) obj = obj.parent;
-      if (obj && obj.userData.wolfRef) {
-        obj.userData.wolfRef.takeDamage(1);
-        this.hud.hitmarker();
+    const dir = new THREE.Vector3();
+    this.camera.getWorldDirection(dir);
+    const muzzlePos = new THREE.Vector3();
+    this.camera.getWorldPosition(muzzlePos);
+    this.bullets.push({
+      pos: muzzlePos,
+      vel: dir.multiplyScalar(CONFIG.rifle.muzzleVelocity),
+      life: CONFIG.rifle.bulletLifetime,
+    });
+  }
+
+  /** Advances in-flight bullets: gravity + a swept raycast per step so fast
+   *  projectiles can't tunnel through a wolf or the terrain between frames. */
+  _updateBullets(dt) {
+    if (this.bullets.length === 0) return;
+    const world = this.getWorld().children.filter((o) => o !== this.camera);
+    for (let i = this.bullets.length - 1; i >= 0; i--) {
+      const b = this.bullets[i];
+      b.life -= dt;
+      const prevPos = b.pos.clone();
+      b.vel.y -= CONFIG.rifle.bulletGravity * dt;
+      b.pos.addScaledVector(b.vel, dt);
+
+      const segment = new THREE.Vector3().subVectors(b.pos, prevPos);
+      const dist = segment.length();
+      let hit = null;
+      if (dist > 1e-6) {
+        segment.divideScalar(dist); // normalize in place
+        this.bulletRaycaster.set(prevPos, segment);
+        this.bulletRaycaster.far = dist;
+        const hits = this.bulletRaycaster.intersectObjects(world, true);
+        hit = firstSolidHit(hits);
+      }
+
+      if (hit) {
+        let obj = hit.object;
+        while (obj && !obj.userData.wolfRef) obj = obj.parent;
+        if (obj && obj.userData.wolfRef) {
+          obj.userData.wolfRef.takeDamage(1);
+          this.hud.hitmarker();
+        }
+        this._spawnImpact(hit.point);
+        this.bullets.splice(i, 1);
+      } else if (b.life <= 0) {
+        this.bullets.splice(i, 1);
+      }
+    }
+  }
+
+  /** A brief burst of sparks where a shot lands — terrain or a wolf alike. */
+  _spawnImpact(point) {
+    const sprites = [];
+    const n = 6 + Math.floor(Math.random() * 3);
+    for (let i = 0; i < n; i++) {
+      const s = makeSparkSprite(0.09 + Math.random() * 0.06, 1);
+      s.position.copy(point);
+      const theta = Math.random() * Math.PI * 2;
+      const speed = 1 + Math.random() * 2.5;
+      s.userData.vel = new THREE.Vector3(
+        Math.cos(theta) * speed,
+        (0.6 + Math.random() * 0.8) * speed,
+        Math.sin(theta) * speed
+      );
+      this.getWorld().add(s);
+      sprites.push(s);
+    }
+    this.impacts.push({ sprites, age: 0, life: 0.35 });
+  }
+
+  _updateImpacts(dt) {
+    for (let i = this.impacts.length - 1; i >= 0; i--) {
+      const imp = this.impacts[i];
+      imp.age += dt;
+      const fade = Math.max(0, 1 - imp.age / imp.life);
+      for (const s of imp.sprites) {
+        s.userData.vel.y -= 9.8 * dt;
+        s.position.addScaledVector(s.userData.vel, dt);
+        s.material.opacity = fade;
+      }
+      if (imp.age >= imp.life) {
+        for (const s of imp.sprites) this.getWorld().remove(s);
+        this.impacts.splice(i, 1);
       }
     }
   }
@@ -243,12 +333,15 @@ export class Weapon {
     const targets = this.getWorld().children.filter((o) => o !== this.camera);
     this.rangeRaycaster.setFromCamera({ x: 0, y: 0 }, this.camera);
     const hits = this.rangeRaycaster.intersectObjects(targets, true);
-    return hits.length > 0 ? Math.round(hits[0].distance) : null;
+    const hit = firstSolidHit(hits);
+    return hit ? Math.round(hit.distance) : null;
   }
 
   update(dt) {
     this.cooldown -= dt;
     this.shotT = Math.max(0, this.shotT - dt);
+    this._updateBullets(dt);
+    this._updateImpacts(dt);
 
     if (this.reloadT > 0) {
       this.reloadT -= dt;

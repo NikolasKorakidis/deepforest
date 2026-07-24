@@ -73,7 +73,6 @@ export class Game {
       controller: this.controller,
       hud: this.hud,
       sfx: this.sfx,
-      getTargets: () => this.wolves.filter((w) => !w.dead).map((w) => w.group),
       getWorld: () => this.scene,
     });
     this.campfires = new CampfireSystem(

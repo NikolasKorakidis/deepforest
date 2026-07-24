@@ -104,7 +104,7 @@ src/
   player/
     PlayerController.js   FPS movement, collision, head bob
     PlayerStats.js        health/hunger/thirst/warmth/energy simulation
-    Weapon.js             animated hands+rifle viewmodel, binoculars, hitscan, ammo
+    Weapon.js             animated hands+rifle viewmodel, binoculars, ballistic projectiles, ammo
   entities/
     Wolf.js               animated wolf model (GLTF skeletal anims) + state-machine AI
   systems/
@@ -218,10 +218,21 @@ Design notes:
   roughly 2x the magnification of hip-fire — (`Weapon.js`'s `scopeView` flag,
   gated on the FOV having actually settled, not on the toggle firing, so the
   reticle doesn't pop in mid-animation), a crosshair overlay fades in with a
-  rangefinder readout in meters (a dedicated raycast against the whole
-  scene, separate from the hitscan raycast so it doesn't disturb the
-  rifle's actual range limit) and a bullet-drop-compensation ladder ready
-  for a future drop mechanic. That crosshair (`scope-reticle.svg`) is a
+  rangefinder readout in meters (its own raycast against the whole scene) and
+  a bullet-drop-compensation ladder that's for real: firing launches an
+  actual projectile (`Weapon.js`'s `_updateBullets`) with a real researched
+  muzzle velocity (808 m/s — 168gr .308 Win Federal Gold Medal Match) that
+  falls under gravity and is swept-raycast each frame so it can't tunnel
+  through a wolf or the terrain between steps; a spark burst
+  (`_spawnImpact`) marks wherever it actually lands. The gravity used isn't
+  real, though — a real .308 only drops centimeters over 100-400m, far too
+  subtle to read on any sane scope reticle, so `CONFIG.rifle.bulletGravity`
+  is instead solved backward from the reticle's own drawn geometry (each BDC
+  mark's angle, given the scope FOV and reticle-to-viewport scale) so that
+  ranging a target with the scope and holding the correct mark (mark 1 for
+  100m, mark 2 for 200m, etc.) lands the shot exactly on target — see the
+  comment above `CONFIG.rifle` for the derivation. That crosshair
+  (`scope-reticle.svg`) is a
   hand-authored vector reticle, not a stock asset — a real stock crosshair
   was tried first but its own baked-in vignette fought with the HUD's, so
   it was redrawn from scratch. The binoculars' vignette mask

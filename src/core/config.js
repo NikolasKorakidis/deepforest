@@ -36,6 +36,21 @@ export const CONFIG = {
     reloadTimeFallback: 2.0, // used only if the reload clip failed to load
     fireCooldown: 0.85,      // paced to the viewmodel's shot-recoil animation
     range: 150,
+    // Bullet drop physics (see Weapon.js's _updateBullets). muzzleVelocity is
+    // a real researched figure (168gr .308 Win Federal Gold Medal Match,
+    // 2650 fps). bulletGravity is NOT real gravity (9.81) — a real .308 only
+    // drops a few centimeters over 100-400m, far too subtle to read on a
+    // scope reticle at any sane magnification. Instead it's solved backward
+    // from the scope-reticle.svg BDC ladder's actual drawn geometry (mark
+    // N sits at angle θ_N = markOffsetUnits(N) * (66/200 reticle-to-vmin
+    // scale) * (26°/100 FOV-per-vh) above center, using vmin≈vh in
+    // landscape) via the small-angle drop relation θ(R) = 0.5·g·R/v², so
+    // that holding mark N on a target ranged at exactly 100·N meters (via
+    // the scope's own rangefinder) lands the shot dead-on. Recompute this
+    // if the reticle geometry, scope FOV, or muzzleVelocity ever changes.
+    muzzleVelocity: 808,
+    bulletGravity: 352,
+    bulletLifetime: 4, // seconds before an unresolved shot is given up on
   },
 
   wolf: {
