@@ -39,7 +39,7 @@ not part of the running game — see the tree/lake design note below.
 | Z (toggle) | Prone — slower still, lowest profile, narrows wolf detection range the most |
 | E | Interact / pick up |
 | LMB | Fire rifle (hip or aimed, animated) |
-| RMB (toggle) | Aim down the scope (crosshair + rangefinder once zoomed in); with binoculars equipped, long-range zoom |
+| RMB (toggle) | Aim down the scope (crosshair + rangefinder once zoomed in, with sway — steadier crouched or prone); with binoculars equipped, long-range zoom |
 | R | Reload (quick or full, depending on how empty the mag is) |
 | 1 / 2 | Equip rifle / binoculars |
 | F | Eat a ration |
@@ -241,6 +241,19 @@ Design notes:
   stock-preview convention, not real alpha), so it was reprocessed offline
   (Ghostscript rasterize → numpy luminance-keyed alpha) to get a real
   transparent PNG.
+- Aim sway (`Weapon.js`, gated by `this.aiming`, tuned in `CONFIG.aim`) is a
+  real camera-rotation drift, not cosmetic — it's applied directly to
+  `camera.rotation` after `PlayerController` sets it for the frame, so it
+  genuinely moves where a fired bullet goes. Two sine waves per axis at
+  non-matching frequencies/phases (rather than one) keep the motion from
+  reading as a metronome; amplitude ramps in/out smoothly with `aiming`
+  rather than snapping, and is scaled by `CONFIG.aim.stanceMult` — standing
+  sways the most, crouching less, prone least — so a steadier stance is a
+  real accuracy trade-off against the wolf-detection stealth bonus that
+  same stance already gives (see `PlayerController.stance`). It also scales
+  with `PlayerStats.energy` (`CONFIG.aim.energySwayMax`) — a winded shooter
+  (low energy from sprinting/hunger/cold) shakes up to 3x worse than a
+  fresh one at full energy, on top of the stance multiplier.
 
 ## Suggested next steps
 

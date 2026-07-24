@@ -16,6 +16,17 @@ export const CONFIG = {
     lookSensitivity: 0.0021,
   },
 
+  // Aim sway while aiming down the rifle scope or through binoculars: a real
+  // camera-rotation drift (not cosmetic — it moves where a fired bullet
+  // actually goes), damped by a steadier stance and worsened by fatigue.
+  // See Weapon.js's sway block.
+  aim: {
+    swayMaxDeg: 0.65,       // peak wander at full energy, standing
+    swayRampRate: 6,        // how fast sway fades in/out when aiming starts/stops
+    stanceMult: { stand: 1, crouch: 0.55, prone: 0.22 },
+    energySwayMax: 3,       // sway multiplier at 0 energy (1x at 100 energy, linear between)
+  },
+
   stats: {
     hungerRate: 0.085,      // per second -> empty in ~20 min
     thirstRate: 0.12,       // per second -> empty in ~14 min

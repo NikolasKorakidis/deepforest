@@ -64,6 +64,8 @@ export class Weapon {
     this.shotT = 0; // keeps a fire animation from being interrupted by walk/idle
     this.aiming = false;
     this.flashT = 0;
+    this.aimAmount = 0; // 0..1, smoothed toward 1 while aiming (see update)
+    this.swayTime = 0;
 
     this.mixer = null;
     this.actions = {};
@@ -381,6 +383,25 @@ export class Weapon {
     // view" illusion once scoped/binoculars are up.
     this.rifleGroup.visible = this.equipped === 'rifle' && !scopeView;
     this.binocGroup.visible = this.equipped === 'binoculars' && !binocAim;
+
+    // Aim sway: a real camera-rotation drift, not a cosmetic wobble — shots
+    // fire along the camera's actual direction, so this is what actually
+    // makes holding a steadier stance (crouch/prone) matter for accuracy.
+    // Ramps in/out smoothly with aiming, layers two off-frequency sine waves
+    // per axis so the motion reads as organic breathing rather than a
+    // metronome, and worsens as energy drains (a winded shooter shakes more).
+    const A = CONFIG.aim;
+    this.aimAmount += ((this.aiming ? 1 : 0) - this.aimAmount) * Math.min(1, dt * A.swayRampRate);
+    if (this.aimAmount > 0.001) {
+      this.swayTime += dt;
+      const stanceMult = A.stanceMult[this.controller.stance] ?? 1;
+      const energyMult = THREE.MathUtils.lerp(A.energySwayMax, 1, this.controller.stats.energy / 100);
+      const amp = THREE.MathUtils.degToRad(A.swayMaxDeg) * stanceMult * energyMult * this.aimAmount;
+      const swayPitch = (Math.sin(this.swayTime * 0.9) * 0.6 + Math.sin(this.swayTime * 2.3 + 1.7) * 0.4) * amp;
+      const swayYaw = (Math.sin(this.swayTime * 0.75 + 0.5) * 0.6 + Math.sin(this.swayTime * 1.9 + 3.1) * 0.4) * amp;
+      this.camera.rotation.x += swayPitch;
+      this.camera.rotation.y += swayYaw;
+    }
 
     // Animation state, by priority: reload > recovering-from-shot > walk > idle.
     if (this.ready) {
