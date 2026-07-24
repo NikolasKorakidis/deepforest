@@ -78,7 +78,7 @@ export class HUD {
             <span><b>WASD</b> move</span><span><b>Shift</b> sprint</span>
             <span><b>C / Ctrl</b> crouch</span><span><b>Z</b> prone</span>
             <span><b>Mouse</b> look</span><span><b>E</b> interact</span>
-            <span><b>LMB</b> fire</span><span><b>RMB</b> aim / zoom</span>
+            <span><b>LMB</b> fire</span><span><b>RMB</b> toggle aim / zoom</span>
             <span><b>R</b> reload</span><span><b>1 / 2</b> rifle / binoculars</span>
             <span><b>F</b> eat ration</span><span><b>T</b> build campfire</span>
             <span><b>E</b> at fire: cook / sleep</span><span><b>Esc</b> pause</span>

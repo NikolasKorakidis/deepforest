@@ -39,7 +39,7 @@ not part of the running game — see the tree/lake design note below.
 | Z (toggle) | Prone — slower still, lowest profile, narrows wolf detection range the most |
 | E | Interact / pick up |
 | LMB | Fire rifle (hip or aimed, animated) |
-| RMB (hold) | Aim down the scope (crosshair + rangefinder once zoomed in); with binoculars equipped, long-range zoom |
+| RMB (toggle) | Aim down the scope (crosshair + rangefinder once zoomed in); with binoculars equipped, long-range zoom |
 | R | Reload (quick or full, depending on how empty the mag is) |
 | 1 / 2 | Equip rifle / binoculars |
 | F | Eat a ration |
@@ -160,7 +160,7 @@ Design notes:
   picks a clip by state: idle when still, walk when moving (its
   `timeScale` scales with actual speed, so sprinting plays the same clip
   faster rather than needing a separate run clip), the hip- or
-  scope-aimed shot clip depending on whether RMB is held, and — reading
+  scope-aimed shot clip depending on whether aiming is toggled on, and — reading
   the two reload clips' actual intent — a quick tactical `Reload` when the
   mag still has rounds vs. the longer `Reload_Full` (with more bolt-work)
   when it's run completely dry; `reloadT` is set directly from whichever
@@ -213,18 +213,23 @@ Design notes:
   (randomly proportioned) trees.
 - The rifle's scope is a solid modeled prop, not a functional see-through
   lens (that would need a separate render-to-texture pass). What sells the
-  aiming is a 2D HUD layer: once the RMB zoom-in tweens the camera to its
-  aimed FOV (`Weapon.js`'s `scopeView` flag — gated on the FOV having
-  actually settled, not on RMB going down, so the reticle doesn't pop in
-  mid-animation), a vector crosshair overlay fades in with a rangefinder
-  readout in meters (a dedicated raycast against the whole scene, separate
-  from the hitscan raycast so it doesn't disturb the rifle's actual range
-  limit). The crosshair and the binoculars' vignette mask are both real
-  stock vector art (`src/assets/textures/`) rather than CSS shapes; the
-  source files only ever encoded transparency as a baked-in checkerboard
-  placeholder graphic (a stock-preview convention, not real alpha), so both
-  were reprocessed offline (Ghostscript rasterize → numpy luminance-keyed
-  alpha) to get real transparent PNGs.
+  aiming is a 2D HUD layer: RMB toggles `aiming` (no need to hold it down),
+  and once the resulting zoom-in tweens the camera to its aimed FOV — 26°,
+  roughly 2x the magnification of hip-fire — (`Weapon.js`'s `scopeView` flag,
+  gated on the FOV having actually settled, not on the toggle firing, so the
+  reticle doesn't pop in mid-animation), a crosshair overlay fades in with a
+  rangefinder readout in meters (a dedicated raycast against the whole
+  scene, separate from the hitscan raycast so it doesn't disturb the
+  rifle's actual range limit) and a bullet-drop-compensation ladder ready
+  for a future drop mechanic. That crosshair (`scope-reticle.svg`) is a
+  hand-authored vector reticle, not a stock asset — a real stock crosshair
+  was tried first but its own baked-in vignette fought with the HUD's, so
+  it was redrawn from scratch. The binoculars' vignette mask
+  (`binoculars-mask.png`) is real stock vector art; its source only ever
+  encoded transparency as a baked-in checkerboard placeholder graphic (a
+  stock-preview convention, not real alpha), so it was reprocessed offline
+  (Ghostscript rasterize → numpy luminance-keyed alpha) to get a real
+  transparent PNG.
 
 ## Suggested next steps
 

@@ -68,8 +68,7 @@ export class Weapon {
     this._buildViewmodels();
 
     input.onMouseDown(0, () => this.tryFire());
-    input.onMouseDown(2, () => { this.aiming = true; });
-    input.onMouseUp(2, () => { this.aiming = false; });
+    input.onMouseDown(2, () => { this.aiming = !this.aiming; });
     input.onPress('KeyR', () => this.tryReload());
     input.onPress('Digit1', () => this.toggle('rifle'));
     input.onPress('Digit2', () => this.toggle('binoculars'));
@@ -264,7 +263,7 @@ export class Weapon {
     let targetFov = 70;
     const binocAim = this.aiming && this.equipped === 'binoculars';
     const rifleAim = this.aiming && this.equipped === 'rifle';
-    if (rifleAim) targetFov = 52;
+    if (rifleAim) targetFov = 26; // ~2x the magnification of the old 52° scope zoom
     if (binocAim) targetFov = 18;
     if (Math.abs(this.camera.fov - targetFov) > 0.01) {
       this.camera.fov += (targetFov - this.camera.fov) * Math.min(1, dt * 10);
