@@ -122,6 +122,7 @@ export class HUD {
     }
     this.compassCtx = this.el('compass').getContext('2d');
     this._toastCount = 0;
+    this._pauseResumeHandler = null;
 
     this.el('retry-btn').addEventListener('click', () => location.reload());
     this.el('end-retry-btn').addEventListener('click', () => location.reload());
@@ -344,12 +345,19 @@ export class HUD {
   showPause(visible, onResume) {
     const screen = this.el('pause-screen');
     screen.classList.toggle('hidden', !visible);
+    // Not a one-shot listener: browsers impose a brief cooldown on
+    // re-requesting pointer lock right after an Escape-driven unlock, so
+    // the first click can silently fail to actually resume. Keep the
+    // handler live so clicking again retries — it's only torn down once
+    // Game.js calls showPause(false), which only happens once the lock
+    // has genuinely re-acquired (see Input's onLockChange).
+    if (this._pauseResumeHandler) {
+      screen.removeEventListener('click', this._pauseResumeHandler);
+      this._pauseResumeHandler = null;
+    }
     if (visible && onResume) {
-      const handler = () => {
-        screen.removeEventListener('click', handler);
-        onResume();
-      };
-      screen.addEventListener('click', handler);
+      this._pauseResumeHandler = () => onResume();
+      screen.addEventListener('click', this._pauseResumeHandler);
     }
   }
 

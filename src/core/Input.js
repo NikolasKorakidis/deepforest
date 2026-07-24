@@ -75,8 +75,18 @@ export class Input {
   lock(el = document.body) {
     try {
       const p = el.requestPointerLock();
-      // Chrome returns a promise that rejects if lock is denied/throttled.
-      if (p && p.catch) p.catch(() => {});
+      // Chrome returns a promise that rejects if lock is denied/throttled —
+      // notably, browsers briefly refuse to re-lock right after the player
+      // hits Escape to unlock, so a "click to resume" immediately after
+      // pausing can silently fail. One retry shortly after covers that
+      // window without the player needing to click again themselves.
+      if (p && p.catch) {
+        p.catch(() => {
+          setTimeout(() => {
+            try { el.requestPointerLock()?.catch(() => {}); } catch { /* still unavailable */ }
+          }, 350);
+        });
+      }
     } catch {
       /* pointer lock unavailable — game still runs, look is disabled */
     }
