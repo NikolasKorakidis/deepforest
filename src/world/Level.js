@@ -34,7 +34,11 @@ const WRECKAGE = { x: pathX(-34) - 7, z: -34 };
 // "to be continued" checkpoint at the end of the valley.
 
 export class Level {
-  constructor({ scene, grid, interactions, inventory, weapon, stats, hud, sfx }) {
+  /** @param takenPickups Set of pickup ids to skip entirely (restoring a save
+   *   — those items were already collected in a previous session).
+   *  @param onQuestAdvance(stage) called right after questStage changes —
+   *   Game.js uses this to autosave at each quest beat. */
+  constructor({ scene, grid, interactions, inventory, weapon, stats, hud, sfx, takenPickups, onQuestAdvance }) {
     this.scene = scene;
     this.grid = grid;
     this.interactions = interactions;
@@ -43,6 +47,8 @@ export class Level {
     this.stats = stats;
     this.hud = hud;
     this.sfx = sfx;
+    this.takenPickups = takenPickups || new Set();
+    this.onQuestAdvance = onQuestAdvance || (() => {});
 
     this.t = 0;
     this.pickupSprites = [];
@@ -148,7 +154,11 @@ export class Level {
   }
 
   // --------------------------------------------------------------- pickups
-  _addPickup(mesh, x, z, label, onTake, { yOffset = 0.15, glowColor = 0xffe9a0 } = {}) {
+  /** @param opts.id stable string identifying this pickup across a save/load —
+   *   if it's already in takenPickups (restoring a save), skip it entirely. */
+  _addPickup(mesh, x, z, label, onTake, { yOffset = 0.15, glowColor = 0xffe9a0, id } = {}) {
+    if (id && this.takenPickups.has(id)) return;
+
     const y = this._groundY(x, z) + yOffset;
     mesh.position.set(x, y, z);
     mesh.traverse((o) => { if (o.isMesh) o.castShadow = true; });
@@ -163,6 +173,10 @@ export class Level {
       radius: 2.6,
       label,
       onUse: (entry) => {
+        // Marked taken before onTake() runs: onTake can synchronously
+        // advance the quest (e.g. the rifle), which autosaves — the save
+        // must already see this pickup as collected.
+        if (id) this.takenPickups.add(id);
         onTake();
         this.sfx.pickup();
         this.scene.remove(mesh);
@@ -200,7 +214,7 @@ export class Level {
     this._addPickup(compass, -1.4, 3.2, 'Take compass', () => {
       inv.hasCompass = true;
       hud.toast('Compass acquired. The valley runs north — follow it.');
-    });
+    }, { id: 'compass' });
 
     const binoc = new THREE.Group();
     const tubeMat = new THREE.MeshStandardMaterial({ color: 0x1e1f22, roughness: 0.6 });
@@ -213,7 +227,7 @@ export class Level {
       inv.hasBinoculars = true;
       this.weapon.giveBinoculars();
       hud.toast('Binoculars acquired — press 2, hold RMB to scan ahead.');
-    });
+    }, { id: 'binoculars' });
 
     const rationBox = new THREE.Mesh(
       new THREE.BoxGeometry(0.35, 0.22, 0.25),
@@ -222,7 +236,7 @@ export class Level {
     this._addPickup(rationBox, 0.9, 3.9, 'Take ration pack (+3 rations)', () => {
       inv.rations += 3;
       hud.toast('Rations stowed. Press F to eat one.');
-    });
+    }, { id: 'rations' });
   }
 
   // ---------------------------------------------------------- wreckage
@@ -274,7 +288,8 @@ export class Level {
         this.weapon.giveRifle();
         this.hud.toast('Rifle equipped — LMB fire, RMB aim, R reload, 1 to holster.');
         this._completeSurvivorsQuest();
-      }
+      },
+      { id: 'rifle' }
     );
 
     const magBox = new THREE.Mesh(
@@ -282,7 +297,7 @@ export class Level {
       new THREE.MeshStandardMaterial({ color: 0x3a4030, roughness: 0.8 })
     );
     this._addPickup(magBox, x - 0.7, z + 0.9, 'Take rifle magazines (+10 rounds)',
-      () => this.weapon.addAmmo(10));
+      () => this.weapon.addAmmo(10), { id: 'ammo' });
   }
 
   _completeSurvivorsQuest() {
@@ -294,6 +309,7 @@ export class Level {
       this.hud.setObjective('Build a campfire');
       this.hud.toast('You should get a fire going before the cold gets worse.', 5500);
     }, 4000);
+    this.onQuestAdvance(this.questStage);
   }
 
   /** Called by Game.js right after a campfire is successfully built. */
@@ -305,6 +321,7 @@ export class Level {
       this.hud.setObjective('Sleep until morning');
       this.hud.toast('Press E at the campfire to cook or sleep until dawn.', 5500);
     }, 3500);
+    this.onQuestAdvance(this.questStage);
   }
 
   /** Called by Game.js right after the player sleeps through to dawn. */
@@ -312,6 +329,19 @@ export class Level {
     if (this.questStage !== 3) return;
     this.questStage = 4;
     this.hud.setObjective('Rested until dawn', true);
+    this.onQuestAdvance(this.questStage);
+  }
+
+  /** The stable resting objective text for a given quest stage — used to
+   *  restore the HUD objective when loading a save (the setTimeout-staged
+   *  transition text above only plays out once, live). */
+  static objectiveForStage(stage) {
+    switch (stage) {
+      case 1: return { text: 'Look for survivors', complete: false };
+      case 2: return { text: 'Build a campfire', complete: false };
+      case 3: return { text: 'Sleep until morning', complete: false };
+      default: return { text: 'Rested until dawn', complete: true };
+    }
   }
 
   /** A signal flare planted at the wreckage — unlike the crash-site flare
@@ -447,10 +477,10 @@ export class Level {
       [pathX(-112) + 5, -112], [POND.x - 10, POND.z - 11],
       [pathX(-192) + 4, -192], [pathX(-228) - 4, -228],
     ];
-    for (const [x, z] of spots) {
+    spots.forEach(([x, z], i) => {
       this._addPickup(this._makeWoodPileProp(), x, z, 'Gather firewood (+2 wood)',
-        () => { this.inventory.wood += 2; }, { yOffset: 0, glowColor: 0xd8b475 });
-    }
+        () => { this.inventory.wood += 2; }, { yOffset: 0, glowColor: 0xd8b475, id: `wood${i}` });
+    });
   }
 
   _buildSupplyCrate() {
@@ -463,7 +493,7 @@ export class Level {
       this.inventory.rations += 2;
       this.weapon.addAmmo(5);
       this.hud.toast('Inside: 2 rations and a box of cartridges (+5). Someone left in a hurry.');
-    }, { yOffset: 0.35 });
+    }, { yOffset: 0.35, id: 'crate' });
     this.grid.insert(x, z, 0.7);
   }
 

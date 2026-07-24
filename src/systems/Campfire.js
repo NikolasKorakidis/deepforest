@@ -35,6 +35,20 @@ export class CampfireSystem {
     const yaw = controller.yaw;
     const x = controller.position.x - Math.sin(yaw) * 1.7;
     const z = controller.position.z - Math.cos(yaw) * 1.7;
+    this._build(x, z, CONFIG.fire.burnTimeSec, hud);
+
+    this.sfx.build();
+    hud.toast('You build a campfire. Stay close to warm up — press E to cook or sleep.');
+    return true;
+  }
+
+  /** Recreates a fire from saved {x, z, fuel} — used when loading a save,
+   *  skipping the wood cost/toast since this isn't a fresh build action. */
+  rebuild(x, z, fuel, hud) {
+    this._build(x, z, fuel, hud);
+  }
+
+  _build(x, z, fuel, hud) {
     const y = terrainHeight(x, z);
 
     const group = new THREE.Group();
@@ -84,7 +98,7 @@ export class CampfireSystem {
       group, flameOuter, flameInner, glow, light, smoke,
       pos: new THREE.Vector3(x, y, z),
       baseY: y + 0.5,
-      fuel: CONFIG.fire.burnTimeSec,
+      fuel,
     };
     this.fires.push(fire);
 
@@ -97,10 +111,6 @@ export class CampfireSystem {
         else this.onInteract(fire);
       },
     });
-
-    this.sfx.build();
-    hud.toast('You build a campfire. Stay close to warm up — press E to cook or sleep.');
-    return true;
   }
 
   update(dt, playerPos, hud) {

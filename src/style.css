@@ -383,3 +383,10 @@ html, body {
   font-family: inherit;
 }
 .screen button:hover { background: rgba(216, 212, 200, 0.15); }
+
+#save-choice {
+  display: flex;
+  gap: 16px;
+  justify-content: center;
+  margin-top: 26px;
+}

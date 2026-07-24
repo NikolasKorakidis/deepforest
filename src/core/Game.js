@@ -16,6 +16,7 @@ import { CampfireSystem } from '../systems/Campfire.js';
 import { Inventory } from '../items/Inventory.js';
 import { HUD } from '../ui/HUD.js';
 import { clamp } from '../world/heightfield.js';
+import { saveGame, loadGame, clearSave } from './save.js';
 
 // Orchestrator: owns the renderer/scene/camera and every game system,
 // drives the fixed update -> render loop, and handles the meta state
@@ -44,6 +45,11 @@ export class Game {
       this.camera.updateProjectionMatrix();
       this.renderer.setSize(window.innerWidth, window.innerHeight);
     });
+
+    // Loaded up front (not just on "Continue") because Level needs
+    // takenPickups at construction time, before the player has chosen
+    // anything on the start screen.
+    this.pendingSave = loadGame();
 
     // --- systems ---
     this.hud = new HUD();
@@ -78,6 +84,8 @@ export class Game {
       scene: this.scene, grid: this.grid, interactions: this.interactions,
       inventory: this.inventory, weapon: this.weapon, stats: this.stats,
       hud: this.hud, sfx: this.sfx,
+      takenPickups: new Set(this.pendingSave?.takenPickups ?? []),
+      onQuestAdvance: () => this.save(),
     });
 
     this.kills = 0;
@@ -103,14 +111,28 @@ export class Game {
     this.elapsed = 0;
     this.warnCooldowns = new Map();
 
-    this.hud.showStart(() => {
-      this.sfx.resume();
-      this.input.lock();
-      this.state = 'playing';
-      this.hud.setObjective('Look for survivors');
-      this.hud.toast('Your head pounds. The helicopter still burns behind you.', 5000);
-      setTimeout(() => this.hud.toast('No one answers your calls. Search the crash site.', 5000), 4000);
-      setTimeout(() => this.hud.toast('Then follow the valley north — into the dark.', 5000), 8500);
+    this.hud.showStart({
+      hasSave: !!this.pendingSave,
+      onBegin: () => {
+        this.sfx.resume();
+        this.input.lock();
+        this.state = 'playing';
+        this.hud.setObjective('Look for survivors');
+        this.hud.toast('Your head pounds. The helicopter still burns behind you.', 5000);
+        setTimeout(() => this.hud.toast('No one answers your calls. Search the crash site.', 5000), 4000);
+        setTimeout(() => this.hud.toast('Then follow the valley north — into the dark.', 5000), 8500);
+      },
+      onContinue: () => {
+        this.sfx.resume();
+        this.input.lock();
+        this.applySave(this.pendingSave);
+        this.state = 'playing';
+        this.hud.toast('Welcome back.');
+      },
+      onNewGame: () => {
+        clearSave();
+        location.reload();
+      },
     });
 
     this.input.onLockChange((locked) => {
@@ -263,6 +285,7 @@ export class Game {
   gameOver() {
     this.state = 'dead';
     document.exitPointerLock();
+    clearSave(); // a dead run shouldn't be "continued"
     this.hud.showDeath({
       cause: this.stats.lastCause,
       day: this.env.day,
@@ -274,10 +297,79 @@ export class Game {
   finish() {
     this.state = 'finished';
     document.exitPointerLock();
+    clearSave(); // the slice is over — nothing left to continue into
     this.hud.showEnd({
       day: this.env.day,
       minutes: Math.round(this.elapsed / 60),
       kills: this.kills,
     });
+  }
+
+  /** Called at each quest beat (see Level.js's onQuestAdvance) — captures
+   *  everything needed to resume roughly where the player left off. */
+  save() {
+    saveGame({
+      questStage: this.level.questStage,
+      takenPickups: [...this.level.takenPickups],
+      day: this.env.day,
+      time: this.env.time,
+      elapsed: this.elapsed,
+      kills: this.kills,
+      player: {
+        x: this.controller.position.x,
+        y: this.controller.position.y,
+        z: this.controller.position.z,
+        yaw: this.controller.yaw,
+        pitch: this.controller.pitch,
+      },
+      stats: {
+        health: this.stats.health,
+        hunger: this.stats.hunger,
+        thirst: this.stats.thirst,
+        warmth: this.stats.warmth,
+        energy: this.stats.energy,
+      },
+      inventory: { ...this.inventory },
+      weapon: {
+        equipped: this.weapon.equipped,
+        magAmmo: this.weapon.magAmmo,
+        reserveAmmo: this.weapon.reserveAmmo,
+      },
+      campfires: this.campfires.fires
+        .filter((f) => f.fuel > 0)
+        .map((f) => ({ x: f.pos.x, z: f.pos.z, fuel: f.fuel })),
+    });
+  }
+
+  /** Restores state saved by save() — called from the start screen's
+   *  "Continue" choice. Level/its pickups are already correct by this point
+   *  (takenPickups was applied at construction, before the start screen). */
+  applySave(data) {
+    this.controller.position.set(data.player.x, data.player.y, data.player.z);
+    this.controller.smoothY = data.player.y;
+    this.controller.yaw = data.player.yaw;
+    this.controller.pitch = data.player.pitch;
+
+    Object.assign(this.stats, data.stats);
+    Object.assign(this.inventory, data.inventory);
+
+    if (this.inventory.hasRifle) this.weapon.giveRifle();
+    if (this.inventory.hasBinoculars) this.weapon.giveBinoculars();
+    this.weapon.magAmmo = data.weapon.magAmmo;
+    this.weapon.reserveAmmo = data.weapon.reserveAmmo;
+    this.weapon.equip(data.weapon.equipped);
+
+    this.env.day = data.day;
+    this.env.time = data.time;
+    this.env.update(0.001, this.controller.position); // refresh lighting before the reveal
+
+    this.elapsed = data.elapsed;
+    this.kills = data.kills;
+
+    this.level.questStage = data.questStage;
+    const { text, complete } = Level.objectiveForStage(data.questStage);
+    this.hud.setObjective(text, complete);
+
+    for (const f of data.campfires) this.campfires.rebuild(f.x, f.z, f.fuel, this.hud);
   }
 }

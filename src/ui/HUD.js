@@ -83,7 +83,11 @@ export class HUD {
             <span><b>F</b> eat ration</span><span><b>T</b> build campfire</span>
             <span><b>E</b> at fire: cook / sleep</span><span><b>Esc</b> pause</span>
           </div>
-          <p class="begin">CLICK TO BEGIN</p>
+          <p class="begin" id="begin-fresh">CLICK TO BEGIN</p>
+          <div id="save-choice" class="hidden">
+            <button id="continue-btn">CONTINUE</button>
+            <button id="newgame-btn">NEW GAME</button>
+          </div>
         </div>
       </div>
 
@@ -309,14 +313,32 @@ export class HUD {
   }
 
   // --------------------------------------------------------------- screens
-  showStart(onBegin) {
+  /**
+   * @param hasSave    if true, shows Continue/New Game buttons instead of
+   *   the plain "click anywhere to begin" panel.
+   * @param onBegin    fresh start (no save present).
+   * @param onContinue resume from the save (hasSave only).
+   * @param onNewGame  discard the save and restart (hasSave only).
+   */
+  showStart({ hasSave = false, onBegin, onContinue, onNewGame }) {
     const screen = this.el('start-screen');
-    const handler = () => {
-      screen.classList.add('hidden');
-      screen.removeEventListener('click', handler);
-      onBegin();
-    };
-    screen.addEventListener('click', handler);
+    this.el('begin-fresh').classList.toggle('hidden', hasSave);
+    this.el('save-choice').classList.toggle('hidden', !hasSave);
+
+    if (hasSave) {
+      this.el('continue-btn').addEventListener('click', () => {
+        screen.classList.add('hidden');
+        onContinue();
+      }, { once: true });
+      this.el('newgame-btn').addEventListener('click', () => onNewGame(), { once: true });
+    } else {
+      const handler = () => {
+        screen.classList.add('hidden');
+        screen.removeEventListener('click', handler);
+        onBegin();
+      };
+      screen.addEventListener('click', handler);
+    }
   }
 
   showPause(visible, onResume) {

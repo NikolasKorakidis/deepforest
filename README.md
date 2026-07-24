@@ -67,6 +67,16 @@ not part of the running game — see the tree/lake design note below.
 5. **The trail marker** — an orange flag at the head of the valley ends the
    slice (~15–25 minutes for a focused run; slower if you explore).
 
+## Saving
+
+The game autosaves to `localStorage` at each of the three quest beats
+(finding the rifle, building a campfire, sleeping until dawn) — no manual
+save action. Reloading the page offers **Continue** (restores position,
+stats, inventory, ammo, quest stage, day/time, and any campfires still
+burning — collected pickups stay collected) or **New Game** (discards the
+save). The save is also cleared on death or reaching the trail marker, since
+neither is a state worth continuing from.
+
 ## Code layout
 
 ```
@@ -79,7 +89,9 @@ src/
     SpatialGrid.js        static circle colliders (trees/rocks/wreck)
     sfx.js                procedural WebAudio sound effects
     glow.js               shared glow-sprite texture helper
+    particleTextures.js   fire/spark/smoke sprite textures for fires and flares
     assets.js             async GLTF loader + model normalize (scale/ground/shadows)
+    save.js               localStorage read/write for the autosave slot
   assets/
     models/               .glb models (crashed helicopter, rifle, wolf, tree_assets, wood_pile)
   world/
