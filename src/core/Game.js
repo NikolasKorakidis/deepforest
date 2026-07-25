@@ -179,7 +179,7 @@ export class Game {
     const dt = Math.min(0.05, this.clock.getDelta());
     if (this.state === 'playing') this.update(dt);
     if (this.state === 'loading') this.hud.setLoadingProgress(loadProgress());
-    this.level.update(dt); // ambient animation keeps running on menus
+    this.level.update(dt, this.env.sun); // ambient animation keeps running on menus
     this.renderer.render(this.scene, this.camera);
   }
 

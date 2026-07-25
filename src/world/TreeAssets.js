@@ -5,10 +5,13 @@ import treeSceneUrl from '../assets/models/tree_assets.glb?url';
 // tree_assets.glb is a pre-trimmed asset: the original source is one
 // hand-built 42MB diorama (lake + ~2700 grass clumps + 23 tree instances,
 // kept in asset-sources/ outside the shipped bundle), not a modular kit.
-// scripts/extract-trees.mjs strips that down to just four named subtrees —
-// two tree species, a leafless "dead tree" variant, and the lake's water
-// mesh — discarding the grass clumps and the diorama's own ground plane
-// (our own terrain and instancing already cover that).
+// scripts/extract-trees.mjs strips that down to four named subtrees — two
+// tree species, a leafless "dead tree" variant, and the lake's water mesh —
+// discarding the grass clumps and the diorama's own ground plane (our own
+// terrain and instancing already cover that). Of those four, only the three
+// tree species are actually used here; the water subtree is still present
+// in the trimmed GLB (harmless, just unused) but the lake surface itself is
+// a fully procedural reflective Water object instead — see Water.js.
 //
 // The raw meshes are authored lying flat (long axis along Z) and stood
 // upright per-instance via a 90°-around-X rotation on the parent node; we
@@ -19,7 +22,7 @@ import treeSceneUrl from '../assets/models/tree_assets.glb?url';
 // Names assigned by scripts/extract-trees.mjs when it trimmed the source
 // file — the raw glTF node names are non-unique and unreliable to look up
 // directly (see that script for why).
-const NODE_NAMES = { big: 'Big', small: 'Small', dead: 'Dead', water: 'Water' };
+const NODE_NAMES = { big: 'Big', small: 'Small', dead: 'Dead' };
 
 function findMeshes(node) {
   let bark = null, leaves = null;
@@ -61,7 +64,9 @@ function extractSpecies(root, nodeName) {
 
 let cached = null;
 
-/** Loads (once) and returns { big, small, dead, waterGeo }. */
+/** Loads (once) and returns { big, small, dead }. The diorama's own water
+ *  mesh (still present in the source GLB) isn't extracted — the lake
+ *  surface is a fully procedural reflective Water object (see Water.js). */
 export function loadTreeAssets() {
   if (!cached) {
     cached = loadGLTF(treeSceneUrl).then((gltf) => {
@@ -70,15 +75,7 @@ export function loadTreeAssets() {
       const small = extractSpecies(root, NODE_NAMES.small);
       const dead = extractSpecies(root, NODE_NAMES.dead);
 
-      const waterNode = root.getObjectByName(NODE_NAMES.water);
-      let waterMesh = null;
-      waterNode.traverse((o) => { if (o.isMesh) waterMesh = o; });
-      const waterGeo = waterMesh.geometry.clone();
-      waterGeo.computeBoundingBox();
-      const wb = waterGeo.boundingBox;
-      const waterRadius = Math.max(wb.max.x - wb.min.x, wb.max.z - wb.min.z) / 2;
-
-      return { big, small, dead, waterGeo, waterRadius };
+      return { big, small, dead };
     });
   }
   return cached;

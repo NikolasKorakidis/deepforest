@@ -7,7 +7,7 @@ import { makeSmokeSprite, makeSparkSprite } from '../core/particleTextures.js';
 import { loadGLTF, normalizeModel } from '../core/assets.js';
 import { loadTreeAssets } from './TreeAssets.js';
 import { wolfSpawnPoints } from '../entities/Wolf.js';
-import { createWaterMaterial, updateWaterMaterial } from './Water.js';
+import { createWaterSurface, updateWaterSurface, createShoreBlend } from './Water.js';
 import helicopterUrl from '../assets/models/helicopter_crashed.glb?url';
 import rifleUrl from '../assets/models/rifle.glb?url';
 import woodPileUrl from '../assets/models/wood_pile.glb?url';
@@ -514,28 +514,29 @@ export class Level {
 
   // ------------------------------------------------------------------ lake
   _buildPond() {
-    const waterMat = createWaterMaterial();
-    this.waterMaterial = waterMat;
+    // Matches terrainHeight's own basin-carve falloff start (POND_RADIUS-3)
+    // — the flat lake bottom — so the water plane's edge can never poke out
+    // over dry land, whatever radius it's given.
+    const flatRadius = POND_RADIUS - 3;
 
-    // Placeholder disc so the basin isn't empty for the moment it takes the
-    // GLB to resolve; swapped for the real (irregular, more natural-looking)
-    // lake-shore mesh once it loads.
-    const placeholder = new THREE.Mesh(new THREE.CircleGeometry(POND_RADIUS, 28), waterMat);
-    placeholder.rotation.x = -Math.PI / 2;
-    placeholder.position.set(POND.x, POND_WATER_Y, POND.z);
-    this.scene.add(placeholder);
+    this.water = createWaterSurface({ x: POND.x, z: POND.z, waterY: POND_WATER_Y, flatRadius });
+    this.scene.add(this.water);
+
+    // Bridges the water's edge into dry ground with a dark wet-sand tint
+    // that fades out over the basin's actual sloped shore (flatRadius up to
+    // where the terrain carve ends, POND_RADIUS+4) — without this the lake
+    // read as a flat disc dropped onto the terrain with a hard seam.
+    this.scene.add(createShoreBlend({
+      x: POND.x, z: POND.z, innerRadius: flatRadius - 1, outerRadius: POND_RADIUS + 4,
+    }));
+
+    // Solid — walking "into" the lake used to just walk you along the dry
+    // basin floor underneath the water plane. Simplest fix: you can't.
+    this.grid.insert(POND.x, POND.z, flatRadius);
 
     loadTreeAssets()
-      .then((assets) => {
-        const water = new THREE.Mesh(assets.waterGeo, waterMat);
-        const scale = POND_RADIUS / assets.waterRadius;
-        water.scale.set(scale, 1, scale);
-        water.position.set(POND.x, POND_WATER_Y, POND.z);
-        this.scene.add(water);
-        this.scene.remove(placeholder);
-        this._buildLakeTrees(assets);
-      })
-      .catch((err) => console.error('Failed to load lake water mesh:', err));
+      .then((assets) => this._buildLakeTrees(assets))
+      .catch((err) => console.error('Failed to load lake treeline assets:', err));
 
     // drink spot at the rim closest to the path
     const dirX = pathX(POND.z) - POND.x;
@@ -664,10 +665,12 @@ export class Level {
   }
 
   // ---------------------------------------------------------------- update
-  update(dt) {
+  /** @param sun Environment's directional light (sun by day, moon by night)
+   *   — keeps the lake's specular highlight tracking wherever it actually is. */
+  update(dt, sun) {
     this.t += dt;
 
-    if (this.waterMaterial) updateWaterMaterial(this.waterMaterial, this.t);
+    if (this.water && sun) updateWaterSurface(this.water, dt, sun);
 
     // pickup glow pulse
     const pulse = 0.24 + Math.sin(this.t * 2.5) * 0.1;

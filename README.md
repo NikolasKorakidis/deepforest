@@ -103,7 +103,8 @@ src/
     heightfield.js        the terrain function — single source of truth for ground height
     Terrain.js            terrain mesh + vertex-color painting
     Vegetation.js         instanced trees/rocks, registered as colliders
-    TreeAssets.js         extracts tree species + lake water mesh from tree_assets.glb
+    TreeAssets.js         extracts tree species from tree_assets.glb
+    Water.js              reflective lake surface + shoreline blend (see design note below)
     Environment.js        day-night cycle: sun/moon, sky, fog, stars
     Level.js              hand-placed content: wreck, loot, lake, signs, checkpoint
   player/
@@ -148,16 +149,56 @@ Design notes:
   mesh by vertex-count signature (glTF node names in this file are
   non-unique, and three.js silently disambiguates/strips them on load, so
   they aren't a reliable way to find things in the raw file) and writes a
-  trimmed `tree_assets.glb` (~5MB) with just those four subtrees.
-  `world/TreeAssets.js` loads that trimmed file once, bakes in the
-  90°-around-X rotation the raw meshes need to stand upright, and recenters
-  each species so its trunk base sits at local origin — matching the
-  convention the old procedural trees used, so `Vegetation.js`'s
-  placement/instancing code didn't need to change, just what geometry it
-  instances. The lake itself replaced the old small circular pond: the
-  basin in `heightfield.js` was widened and pushed further off the path, and
-  a hand-placed ring of real trees (`Level.js#_buildLakeTrees`) surrounds it
-  for a set-piece look distinct from the ambient forest.
+  trimmed `tree_assets.glb` (~5MB) with just those four subtrees — though
+  only the three tree species are actually loaded at runtime now (see the
+  water design note below for why). `world/TreeAssets.js` loads that trimmed
+  file once, bakes in the 90°-around-X rotation the raw meshes need to stand
+  upright, and recenters each species so its trunk base sits at local origin
+  — matching the convention the old procedural trees used, so
+  `Vegetation.js`'s placement/instancing code didn't need to change, just
+  what geometry it instances. The lake itself replaced the old small
+  circular pond: the basin in `heightfield.js` was widened and pushed
+  further off the path, and a hand-placed ring of real trees
+  (`Level.js#_buildLakeTrees`) surrounds it for a set-piece look distinct
+  from the ambient forest.
+- The lake surface (`world/Water.js`) is three.js's own `Water` object (the
+  reflection + normal-mapped ripple shader from the official ocean demo,
+  `three/addons/objects/Water.js`) — a real render-to-texture reflection of
+  the sky, trees and shore each frame, not a flat tinted material. Its
+  distortion normal map is generated on a canvas at startup (sum of a few
+  tileable sine waves, finite-differenced into a tangent-space normal map)
+  rather than a downloaded texture, keeping with the rest of the world
+  (heightfield.js, glow.js, particleTextures.js) having no external image
+  assets. The water plane's radius exactly matches `terrainHeight`'s own
+  basin-carve falloff start (`POND_RADIUS - 3`) so it can never poke out
+  over dry land regardless of tuning; a second mesh, `createShoreBlend`,
+  bridges the gap out to the actual shore — a ring whose vertices sample
+  real terrain height (so it hugs the slope) and fades a dark wet-sand tint
+  into the dry ground via a small gradient texture, rather than leaving a
+  hard seam where the water meets the terrain. The specular highlight
+  tracks the actual sun/moon direction each frame (`updateWaterSurface`), so
+  it repositions correctly through the day-night cycle. The old approach
+  (a `MeshStandardMaterial` with a hand-rolled vertex-displacement ripple
+  and Fresnel rim, no real reflection) is gone entirely. One trade-off:
+  the mirror reflection re-renders the whole scene from a second camera
+  every frame the lake is visible, roughly doubling draw calls for that
+  frame — `textureWidth`/`textureHeight` (currently 1024) in
+  `createWaterSurface` is the first knob to turn down if that's ever a
+  problem on lower-end hardware.
+- Walking "into" the lake used to just walk the player along the dry basin
+  floor underneath the water plane, with no acknowledgment anything was
+  wrong. Simplest fix: you can't — the water radius is now a solid
+  collider (`this.grid.insert(POND.x, POND.z, flatRadius)` in
+  `Level.js#_buildPond`). That surfaced a real latent bug in
+  `SpatialGrid`: it only ever stored a collider under the single grid cell
+  its center fell in, which silently worked for every existing collider
+  (trees, rocks, the wreck — all well under the 8-unit cell size) but broke
+  for the lake, whose 10-unit radius exceeds the cell size, meaning a
+  player standing well within collision range could be in a cell outside
+  `resolveCircle`'s 3x3 search neighborhood and pass straight through.
+  Fixed by having `insert()` register the collider in every cell its
+  bounding box overlaps, with `resolveCircle()` deduping by reference so a
+  multi-cell collider isn't pushed-out against twice in one call.
 - The held rifle viewmodel is a rigged hands+weapon GLB with six authored
   clips (`SRifle_Idle`, `SRifle_Walk`, `SRifle_Shot_nosight`,
   `SRifle_Shot_sight`, `SRifle_Reload`, `SRifle_Reload_Full`) driving the
@@ -201,7 +242,9 @@ Design notes:
 - Terrain collision is "walk anywhere" — steep slopes slow you down only
   visually; there is no cliff blocking beyond the valley walls being tall.
 - Campfires can be built on any ground, including steep or wet spots.
-- The pond is the only water source; no waterborne risk, no bottles.
+- The pond is the only water source; no waterborne risk, no bottles. It's
+  solid rather than swimmable — there's no underwater world/effect, so
+  walking toward it stops at the shore instead.
 - Post-processing is fog + CSS vignette/color overlays rather than a full
   EffectComposer chain (cheap and good enough at this scope).
 - Sleeping doesn't check for nearby threats — wolves politely wait.
