@@ -4,7 +4,10 @@
 // fields into a newer Game.
 
 const KEY = 'deepforest-save';
-const SAVE_VERSION = 1;
+// v2: quest stages renumbered when "find water" was inserted into the
+// chain (old stage 2 meant "build a campfire"; now it means "find water"),
+// so an old save's questStage would silently mean the wrong thing.
+const SAVE_VERSION = 2;
 
 export function saveGame(data) {
   try {

@@ -65,7 +65,8 @@ export const CONFIG = {
   },
 
   wolf: {
-    health: 3,
+    health: 2,              // body shots: two hits down. Headshots always instakill regardless.
+    headshotRadius: 0.35,    // world units around the head bone counted as a headshot
     chaseSpeed: 6.1,
     wanderSpeed: 1.7,
     detectRadiusDay: 24,

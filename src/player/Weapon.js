@@ -273,7 +273,10 @@ export class Weapon {
         let obj = hit.object;
         while (obj && !obj.userData.wolfRef) obj = obj.parent;
         if (obj && obj.userData.wolfRef) {
-          obj.userData.wolfRef.takeDamage(1);
+          const wolf = obj.userData.wolfRef;
+          // Headshots always drop a wolf outright, regardless of remaining
+          // health — everywhere else takes CONFIG.wolf.health hits (2).
+          wolf.takeDamage(wolf.isHeadshot(hit.point) ? Infinity : 1);
           this.hud.hitmarker();
         }
         this._spawnImpact(hit.point);

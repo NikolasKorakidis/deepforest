@@ -25,6 +25,10 @@ const CLIP_NAMES = {
   sit: '05_site',
 };
 const GROUND_PLANE_NAME = 'Plane_unnamed_0';
+// The rig was authored/exported with German bone names — "Kopf" = head.
+// Exact name confirmed via gltf-transform inspection; the regex fallback
+// below guards against the numeric suffix ever shifting on a re-export.
+const HEAD_BONE_NAME = 'Kopf_002_014';
 
 const WOLF_MODEL = {
   size: 1.9,          // target nose-to-tail length, world units
@@ -54,7 +58,9 @@ export class Wolf {
     this.actions = {};
     this.currentAnim = null;
     this.eyeMat = null;
+    this.headBone = null; // found once the model loads; see _loadModel/isHeadshot
     this.ready = false;
+    this._headWorldPos = new THREE.Vector3(); // scratch, reused each isHeadshot() call
 
     // Lightweight placeholder container; raycasts and movement work
     // immediately, the visible model pops in once the GLTF resolves (shared
@@ -77,6 +83,11 @@ export class Wolf {
 
         const plane = clone.getObjectByName(GROUND_PLANE_NAME);
         if (plane) plane.parent.remove(plane);
+
+        this.headBone = clone.getObjectByName(HEAD_BONE_NAME);
+        if (!this.headBone) {
+          clone.traverse((o) => { if (!this.headBone && /kopf/i.test(o.name)) this.headBone = o; });
+        }
 
         // yawOffset is applied once, dynamically, in update()'s facing
         // formula on the outer group — this inner model stays unrotated.
@@ -114,6 +125,13 @@ export class Wolf {
     next.reset().fadeIn(fade).play();
     if (prev) prev.fadeOut(fade);
     this.currentAnim = name;
+  }
+
+  /** @param point world-space hit point (from the bullet's raycast) */
+  isHeadshot(point) {
+    if (!this.headBone) return false;
+    this.headBone.getWorldPosition(this._headWorldPos);
+    return this._headWorldPos.distanceTo(point) < CONFIG.wolf.headshotRadius;
   }
 
   takeDamage(n) {
@@ -250,11 +268,14 @@ export class Wolf {
   }
 }
 
-/** Deterministic wolf dens along the route. */
+/** Wolf territory: the lake. Tied to the "find water" quest beat — the
+ *  danger is exactly where that objective sends the player, not scattered
+ *  the whole length of the route. Both dens sit just past the lake's own
+ *  treeline (clear of the water and of the path-facing approach shore —
+ *  see Level.js's _buildLakeTrees for that same clearance math). */
 export function wolfSpawnPoints(pathXFn, pond) {
   return [
-    { x: pathXFn(-95) + 6, z: -95 },
-    { x: pond.x + 4, z: pond.z + 20 }, // north shore of the lake, clear of the water
-    { x: pathXFn(-235) - 7, z: -235 },
+    { x: pond.x + 4, z: pond.z + 20 },   // north shore
+    { x: pond.x + 16, z: pond.z - 14 },  // south-east shore
   ];
 }

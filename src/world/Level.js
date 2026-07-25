@@ -6,6 +6,7 @@ import { makeGlowSprite } from '../core/glow.js';
 import { makeSmokeSprite, makeSparkSprite } from '../core/particleTextures.js';
 import { loadGLTF, normalizeModel } from '../core/assets.js';
 import { loadTreeAssets } from './TreeAssets.js';
+import { wolfSpawnPoints } from '../entities/Wolf.js';
 import { createWaterMaterial, updateWaterMaterial } from './Water.js';
 import helicopterUrl from '../assets/models/helicopter_crashed.glb?url';
 import rifleUrl from '../assets/models/rifle.glb?url';
@@ -70,8 +71,8 @@ export class Level {
     this._buildSigns();
     this._buildCheckpoint();
 
-    // No wolves on this map — it's a quiet, unsettling valley, not a hunt.
-    this.wolfSpawns = [];
+    // Wolf territory is the lake — see Wolf.js's wolfSpawnPoints for why.
+    this.wolfSpawns = wolfSpawnPoints(pathX, POND);
     this.checkpoint = new THREE.Vector3(
       CHECKPOINT.x, terrainHeight(CHECKPOINT.x, CHECKPOINT.z), CHECKPOINT.z
     );
@@ -306,6 +307,19 @@ export class Level {
     this.hud.setObjective('No survivors — just their gear', true);
     this.hud.toast("Whoever carried this didn't leave willingly. You're on your own out here.", 6500);
     setTimeout(() => {
+      this.hud.setObjective('Find water');
+      this.hud.toast('Your throat is raw. There should be water further up the valley.', 5500);
+    }, 4000);
+    this.onQuestAdvance(this.questStage);
+  }
+
+  /** Called by the lake's drink interaction the first time the player uses it. */
+  _completeWaterQuest() {
+    if (this.questStage !== 2) return;
+    this.questStage = 3;
+    this.hud.setObjective('Found water', true);
+    this.hud.toast('Something moved across the water, in the treeline.', 6000);
+    setTimeout(() => {
       this.hud.setObjective('Build a campfire');
       this.hud.toast('You should get a fire going before the cold gets worse.', 5500);
     }, 4000);
@@ -314,8 +328,8 @@ export class Level {
 
   /** Called by Game.js right after a campfire is successfully built. */
   notifyCampfireBuilt() {
-    if (this.questStage !== 2) return;
-    this.questStage = 3;
+    if (this.questStage !== 3) return;
+    this.questStage = 4;
     this.hud.setObjective('Camp made — settle in for the night', true);
     setTimeout(() => {
       this.hud.setObjective('Sleep until morning');
@@ -326,8 +340,8 @@ export class Level {
 
   /** Called by Game.js right after the player sleeps through to dawn. */
   notifySlept() {
-    if (this.questStage !== 3) return;
-    this.questStage = 4;
+    if (this.questStage !== 4) return;
+    this.questStage = 5;
     this.hud.setObjective('Rested until dawn', true);
     this.onQuestAdvance(this.questStage);
   }
@@ -338,8 +352,9 @@ export class Level {
   static objectiveForStage(stage) {
     switch (stage) {
       case 1: return { text: 'Look for survivors', complete: false };
-      case 2: return { text: 'Build a campfire', complete: false };
-      case 3: return { text: 'Sleep until morning', complete: false };
+      case 2: return { text: 'Find water', complete: false };
+      case 3: return { text: 'Build a campfire', complete: false };
+      case 4: return { text: 'Sleep until morning', complete: false };
       default: return { text: 'Rested until dawn', complete: true };
     }
   }
@@ -535,6 +550,7 @@ export class Level {
         this.stats.drink();
         this.sfx.drink();
         this.hud.toast('You drink deeply. The water is ice-cold and clean.');
+        this._completeWaterQuest();
       },
     });
   }

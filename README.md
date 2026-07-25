@@ -55,23 +55,28 @@ not part of the running game — see the tree/lake design note below.
    (firewood) as you go.
 3. **Stats tick down** — hunger, thirst and energy drain over time; warmth
    drops hard at night and at altitude. Empty bars bleed health. Eat rations
-   (F), drink at the lake halfway up the valley, and build a campfire (T)
-   before dark. Press E beside a lit fire to open a cook/sleep wheel: Cook
-   (eat a ration for a bigger restore than raw, if you have one) or Sleep
-   (skips to first light — only available once it's dim enough out; burns
-   the fire down to embers).
-4. **Wolves** — three dens sit along the route. Wolves wander/sit near home,
-   detect you at range (farther at night — watch for the eyes), close in at
-   a run, then drop to a stalking creep right before lunging. Three rifle
-   hits put one down. You can also just outrun them.
-5. **The trail marker** — an orange flag at the head of the valley ends the
+   (F) and build a campfire (T) before dark. Press E beside a lit fire to
+   open a cook/sleep wheel: Cook (eat a ration for a bigger restore than raw,
+   if you have one) or Sleep (skips to first light — only available once
+   it's dim enough out; burns the fire down to embers).
+4. **The quest chain** — find survivors (the rifle at the second wreck) →
+   find water (drink at the lake halfway up the valley) → build a campfire →
+   sleep until dawn. Autosaves at each beat (see Saving, below).
+5. **Wolves** — two dens ring the lake, guarding the water the quest sends
+   you to. Wolves wander/sit near home, detect you at range (farther at
+   night — watch for the eyes), close in at a run, then drop to a stalking
+   creep right before lunging. Body shots take two hits to put one down; a
+   headshot drops one instantly regardless of remaining health. You can
+   also just outrun them.
+6. **The trail marker** — an orange flag at the head of the valley ends the
    slice (~15–25 minutes for a focused run; slower if you explore).
 
 ## Saving
 
-The game autosaves to `localStorage` at each of the three quest beats
-(finding the rifle, building a campfire, sleeping until dawn) — no manual
-save action. Reloading the page offers **Continue** (restores position,
+The game autosaves to `localStorage` at each of the four quest beats
+(finding the rifle, finding water, building a campfire, sleeping until dawn)
+— no manual save action. Reloading the page offers **Continue** (restores
+position,
 stats, inventory, ammo, quest stage, day/time, and any campfires still
 burning — collected pickups stay collected) or **New Game** (discards the
 save). The save is also cleared on death or reaching the trail marker, since
