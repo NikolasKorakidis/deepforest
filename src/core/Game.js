@@ -17,6 +17,7 @@ import { Inventory } from '../items/Inventory.js';
 import { HUD } from '../ui/HUD.js';
 import { clamp } from '../world/heightfield.js';
 import { saveGame, loadGame, clearSave } from './save.js';
+import { PerfScaler } from './PerfScaler.js';
 import { allAssetsSettled, loadProgress } from './assets.js';
 
 // Orchestrator: owns the renderer/scene/camera and every game system,
@@ -28,7 +29,11 @@ export class Game {
     // --- renderer / scene / camera ---
     this.renderer = new THREE.WebGLRenderer({ antialias: true });
     this.renderer.setSize(window.innerWidth, window.innerHeight);
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    // Pixel ratio is owned by PerfScaler from here on. It starts at 1.5
+    // rather than the device's own ratio because on a 2x display that meant
+    // rendering four times the pixels, which is by far the cheapest thing
+    // to give up and the least likely to be noticed.
+    this.perf = new PerfScaler(this.renderer, { targetFps: 60, minScale: 0.6, maxScale: 1.5 });
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -36,8 +41,10 @@ export class Game {
     container.appendChild(this.renderer.domElement);
 
     this.scene = new THREE.Scene();
+    // far=420 spans the whole basin corner to corner; it was 900, which
+    // bought nothing but spent depth-buffer precision.
     this.camera = new THREE.PerspectiveCamera(
-      70, window.innerWidth / window.innerHeight, 0.08, 900
+      70, window.innerWidth / window.innerHeight, 0.08, 420
     );
     this.scene.add(this.camera); // required: viewmodels are camera children
 
@@ -185,7 +192,8 @@ export class Game {
     // Ambient animation keeps running on menus, so the start screen has a
     // living world behind it rather than a freeze-frame.
     this.level.update(dt, this.env.sun);
-    updateVegetation(dt); // grass wind
+    updateVegetation(dt, this.camera.position); // grass wind + chunk culling
+    this.perf.update(dt);
     this.renderer.render(this.scene, this.camera);
   }
 

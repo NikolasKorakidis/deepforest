@@ -88,7 +88,7 @@ export class Weapon {
     // distance to anything in the scene (not just wolves), so it needs its
     // own far plane matching the camera's.
     this.rangeRaycaster = new THREE.Raycaster();
-    this.rangeRaycaster.far = 900;
+    this.rangeRaycaster.far = 420; // matches the camera's far plane
 
     this._buildViewmodels();
 

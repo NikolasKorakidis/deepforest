@@ -15,6 +15,66 @@ import { loadTreeAssets } from './TreeAssets.js';
 
 const BASE_TREE_HEIGHT = 6.5; // world units at scale=1, before per-instance variance
 
+// Vegetation is built per spatial chunk rather than as one InstancedMesh
+// per species spanning the whole map. That matters more than it looks:
+// a world-spanning InstancedMesh has a world-spanning bounding sphere, so
+// it is never frustum-culled, never shadow-frustum-culled, and never culled
+// out of the water's reflection pass — every tree in the world gets
+// processed three times a frame no matter where you stand or look. Chunked,
+// each pass only touches the chunks it can actually see.
+//
+// Chunk size trades culling granularity against draw calls, and the two
+// kinds of vegetation want different answers. Grass is one draw call per
+// chunk and is culled aggressively by distance, so it wants small chunks
+// (fine-grained culling, cheap). Trees are up to six draw calls per chunk
+// (bark + leaves for each of three species) and are visible to the horizon,
+// so small chunks would trade a geometry problem for a draw-call problem —
+// they get a coarse grid, where the win is that the shadow and reflection
+// passes can finally cull most of the forest.
+const GRASS_CHUNK = 25;
+const TREE_CHUNK = 70;
+
+/** Grass is only worth drawing close up; beyond this it's shrunk out by the
+ *  shader and its chunk switched off entirely. */
+const GRASS_FADE_START = 40;
+const GRASS_FADE_END = 55;
+const GRASS_CHUNK_CUTOFF = 62; // > FADE_END, so chunks vanish already invisible
+
+/** Trees stay visible to the far edge of the basin — this exists to drop
+ *  chunks behind the camera and beyond the fog, not to thin the forest. */
+const TREE_CHUNK_CUTOFF = 260;
+
+// Built chunks, per grid. Each: { cx, cz, half, spots, mesh }
+const treeChunks = [];
+const grassChunks = [];
+
+/** Finds or creates the chunk record covering (x, z) on the given grid. */
+function chunkFor(map, list, size, x, z) {
+  const gx = Math.floor(x / size), gz = Math.floor(z / size);
+  const key = `${gx},${gz}`;
+  let c = map.get(key);
+  if (!c) {
+    c = {
+      cx: (gx + 0.5) * size,
+      cz: (gz + 0.5) * size,
+      half: size * 0.5,
+      spots: [],
+      mesh: null, // Group of InstancedMeshes (trees) or one InstancedMesh (grass)
+    };
+    map.set(key, c);
+    list.push(c);
+  }
+  return c;
+}
+
+/** Distance from a point to the chunk's edge (0 if inside) — judging by
+ *  centre would penalise a chunk you're standing at the boundary of. */
+function chunkDistance(c, pos) {
+  const dx = Math.max(0, Math.abs(pos.x - c.cx) - c.half);
+  const dz = Math.max(0, Math.abs(pos.z - c.cz) - c.half);
+  return Math.hypot(dx, dz);
+}
+
 // Grass is the expensive one — a fixed budget of billboard clumps spread
 // over the area the player actually roams, rather than the whole 400x400
 // map (most of which is behind the ridge). Tuned for a dense look up close
@@ -40,8 +100,10 @@ const FIREWOOD_EVERY_N_TREES = 5;
  *  Derived from the tree scatter rather than placed separately, so every
  *  pile genuinely sits under a tree. */
 export function scatterVegetation(scene, grid) {
-  const treeSpots = scatterTrees(scene, grid);
-  scatterGrass(scene);
+  treeChunks.length = 0;
+  grassChunks.length = 0;
+  const treeSpots = scatterTrees(scene, grid, new Map());
+  scatterGrass(scene, new Map());
   scatterRocks(scene, grid);
 
   const firewoodSpots = [];
@@ -67,7 +129,7 @@ function pickSpecies(ix, iz) {
   return roll < 0.56 ? 'small' : 'big';
 }
 
-function scatterTrees(scene, grid) {
+function scatterTrees(scene, grid, chunkMap) {
   const spots = [];
   for (let gx = WORLD.minX + 6; gx < WORLD.maxX - 6; gx += 5.5) {
     for (let gz = WORLD.minZ + 6; gz < WORLD.maxZ - 6; gz += 5.5) {
@@ -88,13 +150,15 @@ function scatterTrees(scene, grid) {
       if (slopeAt(x, z) > 0.85) continue;   // cliffs
 
       const scale = 0.75 + hash2(ix, iz, 4) * 0.8;
-      spots.push({
+      const spot = {
         x, z, y,
         scale,
         rot: hash2(ix, iz, 5) * Math.PI * 2,
         shade: 0.85 + hash2(ix, iz, 6) * 0.3,
         species: pickSpecies(ix, iz),
-      });
+      };
+      spots.push(spot);
+      chunkFor(chunkMap, treeChunks, TREE_CHUNK, x, z).spots.push(spot);
       // Collider registers immediately — collision doesn't wait on the GLB.
       grid.insert(x, z, 0.5 * scale);
     }
@@ -102,16 +166,21 @@ function scatterTrees(scene, grid) {
 
   loadTreeAssets()
     .then((assets) => {
-      buildSpeciesInstances(scene, spots.filter((s) => s.species === 'big'), assets.big);
-      buildSpeciesInstances(scene, spots.filter((s) => s.species === 'small'), assets.small);
-      buildSpeciesInstances(scene, spots.filter((s) => s.species === 'dead'), assets.dead);
+      for (const c of treeChunks) {
+        const group = new THREE.Group();
+        for (const name of ['big', 'small', 'dead']) {
+          buildSpeciesInstances(group, c.spots.filter((s) => s.species === name), assets[name]);
+        }
+        c.mesh = group;
+        scene.add(group);
+      }
     })
     .catch((err) => console.error('Failed to load tree assets:', err));
 
   return spots;
 }
 
-function buildSpeciesInstances(scene, spots, species) {
+function buildSpeciesInstances(parent, spots, species) {
   if (spots.length === 0) return;
 
   const parts = [new THREE.InstancedMesh(species.barkGeo, species.barkMat, spots.length)];
@@ -136,7 +205,7 @@ function buildSpeciesInstances(scene, spots, species) {
     p.castShadow = true;
     p.receiveShadow = true;
     if (p.instanceColor) p.instanceColor.needsUpdate = true;
-    scene.add(p);
+    parent.add(p);
   }
 }
 
@@ -249,6 +318,14 @@ function makeGrassMaterial() {
           float bend = gust * uv.y * uv.y;
           transformed.x += bend * 0.3;
           transformed.z += bend * 0.17;
+
+          // Distance LOD: shrink each clump into the ground as it nears the
+          // draw limit. Scaling (rather than fading alpha) keeps the
+          // material opaque — alpha fade would need blending and per-frame
+          // depth sorting. By GRASS_FADE_END the clump has no size at all,
+          // so switching the whole chunk off just past that is invisible.
+          float camDist = distance(cameraPosition, iPos);
+          transformed *= 1.0 - smoothstep(${GRASS_FADE_START}.0, ${GRASS_FADE_END}.0, camDist);
         }`
       );
   };
@@ -256,15 +333,12 @@ function makeGrassMaterial() {
   return material;
 }
 
-function scatterGrass(scene) {
-  const geo = makeGrassClumpGeometry();
-  const mat = makeGrassMaterial();
-  const mesh = new THREE.InstancedMesh(geo, mat, GRASS_BUDGET);
-
-  const dummy = new THREE.Object3D();
-  const color = new THREE.Color();
+function scatterGrass(scene, chunkMap) {
   let n = 0;
 
+  // Pass 1: bucket accepted clumps into their chunks. Building the
+  // InstancedMeshes only afterwards means each one is sized exactly to its
+  // chunk's population rather than over-allocated.
   for (let i = 0; i < GRASS_BUDGET * 3 && n < GRASS_BUDGET; i++) {
     // sqrt on the radius keeps the disc evenly covered instead of bunching
     // everything around the origin.
@@ -288,36 +362,75 @@ function scatterGrass(scene) {
     if (y > 26) continue; // above the treeline it's rock and snow
     if (slopeAt(x, z) > 0.75) continue; // bare rock, not meadow
 
-    const h = 0.55 + hash2(i, 3, 44) * 0.75;
-    const w = 0.9 + hash2(i, 4, 45) * 0.8;
-    dummy.position.set(x, y - 0.05, z); // sunk slightly so cards never float
-    dummy.rotation.set(0, hash2(i, 5, 46) * Math.PI * 2, 0);
-    dummy.scale.set(w, h, w);
-    dummy.updateMatrix();
-    mesh.setMatrixAt(n, dummy.matrix);
-
-    // Slight per-clump tint: yellower in the open, deeper green in shade.
-    const tint = 0.82 + hash2(i, 6, 47) * 0.36;
-    color.setRGB(tint * (1.05 - density * 0.25), tint, tint * (0.9 + density * 0.1));
-    mesh.setColorAt(n, color);
+    chunkFor(chunkMap, grassChunks, GRASS_CHUNK, x, z).spots.push({
+      x, y: y - 0.05, z, // sunk slightly so cards never float
+      h: 0.55 + hash2(i, 3, 44) * 0.75,
+      w: 0.9 + hash2(i, 4, 45) * 0.8,
+      rot: hash2(i, 5, 46) * Math.PI * 2,
+      // Slight per-clump tint: yellower in the open, deeper green in shade.
+      tint: 0.82 + hash2(i, 6, 47) * 0.36,
+      density,
+    });
     n++;
   }
 
-  // Only `n` of the budget survived the terrain/density filters — tell
-  // three.js to draw exactly that many rather than leaving the tail of the
-  // buffer as garbage instances at the origin.
-  mesh.count = n;
-  mesh.instanceMatrix.needsUpdate = true;
-  if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
-  mesh.castShadow = false;   // 17k shadow casters is not worth it
-  mesh.receiveShadow = true;
-  mesh.name = 'grass';
-  scene.add(mesh);
+  // Pass 2: one InstancedMesh per chunk, all sharing the same geometry and
+  // material so this stays a handful of state changes rather than a
+  // material per chunk.
+  const geo = makeGrassClumpGeometry();
+  const mat = makeGrassMaterial();
+  const dummy = new THREE.Object3D();
+  const color = new THREE.Color();
+
+  for (const c of grassChunks) {
+    const mesh = new THREE.InstancedMesh(geo, mat, c.spots.length);
+    c.spots.forEach((s, i) => {
+      dummy.position.set(s.x, s.y, s.z);
+      dummy.rotation.set(0, s.rot, 0);
+      dummy.scale.set(s.w, s.h, s.w);
+      dummy.updateMatrix();
+      mesh.setMatrixAt(i, dummy.matrix);
+      color.setRGB(
+        s.tint * (1.05 - s.density * 0.25),
+        s.tint,
+        s.tint * (0.9 + s.density * 0.1)
+      );
+      mesh.setColorAt(i, color);
+    });
+    mesh.instanceMatrix.needsUpdate = true;
+    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    mesh.castShadow = false;   // tens of thousands of shadow casters is not worth it
+    mesh.receiveShadow = true;
+    mesh.name = 'grass';
+    // Grass must not be a raycast target. Bullets and the scope rangefinder
+    // both raycast the whole scene, and three.js's raycasting tests layers
+    // but *not* visibility — so without this a shot across a meadow stops
+    // dead on the first blade of grass in front of the muzzle, and the
+    // rangefinder reads a metre instead of the hillside. A no-op raycast is
+    // the idiomatic way to make an object unpickable while still drawing it.
+    mesh.raycast = () => {};
+    c.mesh = mesh;
+    scene.add(mesh);
+  }
 }
 
-/** Advances the grass wind animation. Called once per frame from Game. */
-export function updateVegetation(dt) {
+/**
+ * Advances the wind animation and switches whole chunks on and off by
+ * distance. This is coarse, per-chunk work (a few dozen distance checks a
+ * frame) on top of the per-object frustum culling three.js already does —
+ * the point is that both only became possible once vegetation stopped
+ * being one world-spanning mesh per species.
+ */
+export function updateVegetation(dt, cameraPos) {
   grassUniforms.uTime.value += dt;
+  if (!cameraPos) return;
+
+  for (const c of grassChunks) {
+    if (c.mesh) c.mesh.visible = chunkDistance(c, cameraPos) < GRASS_CHUNK_CUTOFF;
+  }
+  for (const c of treeChunks) {
+    if (c.mesh) c.mesh.visible = chunkDistance(c, cameraPos) < TREE_CHUNK_CUTOFF;
+  }
 }
 
 // ------------------------------------------------------------------- rocks

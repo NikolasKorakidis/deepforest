@@ -53,8 +53,13 @@ export class Environment {
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(2048, 2048);
     const cam = this.sun.shadow.camera;
-    cam.left = -60; cam.right = 60; cam.top = 60; cam.bottom = -60;
-    cam.near = 1; cam.far = 400;
+    // Tightened from ±60 to ±42. The shadow camera's extent decides both
+    // how many objects get re-rendered into the shadow map each frame and
+    // how much texel resolution each one gets, so shrinking it is a rare
+    // change that makes shadows both cheaper *and* sharper. 42 units still
+    // covers well beyond the distance shadow detail is readable at.
+    cam.left = -42; cam.right = 42; cam.top = 42; cam.bottom = -42;
+    cam.near = 1; cam.far = 260;
     this.sun.shadow.bias = -0.0004;
     this.sun.shadow.normalBias = 0.5;
     scene.add(this.sun);

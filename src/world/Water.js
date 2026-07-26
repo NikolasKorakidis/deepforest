@@ -123,8 +123,12 @@ export function createWaterSurface({ x, z, waterY, flatRadius }) {
   const normalMap = makeWaterNormalTexture();
 
   const water = new Water(geometry, {
-    textureWidth: 1024,
-    textureHeight: 1024,
+    // 512 rather than 1024: this target is re-rendered from a second camera
+    // with the whole scene in it, so its cost scales with area. On a lake
+    // this size, at the distances it's actually viewed from, the extra
+    // resolution wasn't visible — the ripple distortion smears it anyway.
+    textureWidth: 512,
+    textureHeight: 512,
     waterNormals: normalMap,
     sunDirection: new THREE.Vector3(0, 1, 0),
     sunColor: 0xffffff,
@@ -136,6 +140,22 @@ export function createWaterSurface({ x, z, waterY, flatRadius }) {
   water.rotation.x = -Math.PI / 2;
   water.position.set(x, waterY, z);
   water.receiveShadow = true;
+
+  // The reflection is a full second render of the scene. Doing that every
+  // frame is the single most expensive thing in the game, and it is almost
+  // entirely wasted when the lake is a small patch in the distance — so
+  // re-render it on an interval that widens with distance, reusing the
+  // previous render target in between. Water is diffuse and slow-moving
+  // enough that a reflection one or three frames stale is imperceptible;
+  // up close it still runs every frame.
+  const renderReflection = water.onBeforeRender;
+  let frame = 0;
+  const lakeCenter = new THREE.Vector3(x, waterY, z);
+  water.onBeforeRender = function (renderer, scene, camera) {
+    const d = camera.position.distanceTo(lakeCenter);
+    const interval = d < 45 ? 1 : d < 120 ? 2 : 4;
+    if (frame++ % interval === 0) renderReflection.call(this, renderer, scene, camera);
+  };
 
   return water;
 }

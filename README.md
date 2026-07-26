@@ -101,6 +101,7 @@ src/
     particleTextures.js   fire/spark/smoke sprite textures for fires and flares
     assets.js             async GLTF loader + model normalize (scale/ground/shadows)
     save.js               localStorage read/write for the autosave slot
+    PerfScaler.js         adaptive render-resolution scaling to hold 60fps
   assets/
     models/               .glb models (crashed helicopter, rifle, wolf, tree_assets, wood_pile)
   world/
@@ -125,6 +126,55 @@ src/
   ui/
     HUD.js + style.css    DOM HUD: bars, compass, toasts, overlays, menus
 ```
+
+## Performance
+
+The expensive frame is the one where you crest a ridge and the whole basin
+comes into frustum at once. Four things keep that at 60fps, in rough order
+of how much they bought:
+
+- **Chunked vegetation.** Trees and grass are built as one `InstancedMesh`
+  per *spatial chunk* rather than one per species spanning the map. A
+  world-spanning instanced mesh has a world-spanning bounding sphere, so it
+  is never frustum-culled, never shadow-frustum-culled and never culled out
+  of the water's reflection pass — every tree in the world was being
+  processed three times a frame regardless of where you stood or looked.
+  Chunked, the sun's shadow pass went from 2.50M to ~0.45M triangles.
+  The two grids are sized differently on purpose: grass uses small chunks
+  (25 units — one cheap draw call each, culled hard by distance), trees use
+  coarse ones (70 units) because each chunk is up to six draw calls and
+  small chunks just trade a geometry problem for a draw-call problem.
+- **Grass distance LOD.** A vertex-shader term shrinks each clump to nothing
+  between 40m and 55m, then the chunk switches off past 62m — so the pop is
+  invisible, and the overdraw that alpha-tested grass generates is bounded
+  to a 55m bubble instead of the whole 125m field. Drawn clumps drop from
+  38,000 to roughly 5,000–18,000 depending on where you stand.
+- **Throttled water reflection.** The reflection is a second full render of
+  the scene, and it's nearly all waste when the lake is a distant patch, so
+  it re-renders every frame within 45m, every second frame within 120m, and
+  every fourth beyond, reusing the previous target in between — water is
+  diffuse enough that a frame or three of staleness doesn't read. Target
+  resolution also dropped from 1024² to 512², which the ripple distortion
+  smears over anyway.
+- **Adaptive resolution** (`core/PerfScaler.js`). The safety net: it watches
+  a rolling median of frame time (median, so one GC pause doesn't drag
+  quality down) and trades render scale between 0.6x and 1.5x to hold the
+  target, with hysteresis and a cooldown so it can't oscillate. It also
+  caps the starting pixel ratio at 1.5 rather than the device's own — on a
+  2x display that was rendering four times the pixels, the cheapest thing
+  in the whole frame to give up.
+
+Smaller: the shadow camera tightened from ±60 to ±42 units, which makes
+shadows simultaneously cheaper (fewer casters re-rendered) and sharper (more
+texels each); and the camera's far plane came down from 900 to 420, which
+spans the basin corner-to-corner and stops wasting depth precision.
+
+One trap worth knowing if you add scenery: **three.js raycasting tests
+layers but not `visible`**, so a culled chunk is still a raycast target, and
+anything you add to the scene becomes something bullets and the scope
+rangefinder can hit. Grass sets `mesh.raycast = () => {}` for exactly this
+reason — without it a shot across a meadow stops on the first blade in front
+of the muzzle and the rangefinder reads one metre instead of the hillside.
 
 Design notes:
 
@@ -286,11 +336,9 @@ Design notes:
   instance matrix instead of removing an object, and they deliberately skip
   the loot pickups' glow sprite since the `[E]` prompt is discovery enough
   for something this common.
-- Grass is one static `InstancedMesh` covering the whole play area, so its
-  bounding sphere is always on screen and frustum culling never helps —
-  every clump is submitted every frame (still just one draw call). A
-  chunked or player-following field would be the fix if it ever costs too
-  much; `GRASS_BUDGET` in `Vegetation.js` is the quick knob.
+- Vegetation LOD is distance-based only — there are no lower-poly tree
+  models, so a distant tree costs the same ~2000 triangles as a near one.
+  Real impostors/billboards for far chunks would be the next step.
 - Campfires can be built on any ground, including steep or wet spots.
 - The pond is the only water source; no waterborne risk, no bottles. It's
   solid rather than swimmable — there's no underwater world/effect, so
