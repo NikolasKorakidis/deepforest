@@ -33,10 +33,29 @@ function inLake(x, z, margin = 1) {
   return Math.hypot(x - POND.x, z - POND.z) < POND_RADIUS + margin;
 }
 
+/** Every Nth tree gets a pile of fallen branches at its foot. */
+const FIREWOOD_EVERY_N_TREES = 5;
+
+/** @returns { firewoodSpots } — where Level should put gatherable firewood.
+ *  Derived from the tree scatter rather than placed separately, so every
+ *  pile genuinely sits under a tree. */
 export function scatterVegetation(scene, grid) {
-  scatterTrees(scene, grid);
+  const treeSpots = scatterTrees(scene, grid);
   scatterGrass(scene);
   scatterRocks(scene, grid);
+
+  const firewoodSpots = [];
+  for (let i = 0; i < treeSpots.length; i += FIREWOOD_EVERY_N_TREES) {
+    const t = treeSpots[i];
+    // Nudged off the trunk so the pile isn't buried inside it, and given
+    // its own rotation so the piles don't all face the same way.
+    const a = hash2(i, 0, 71) * Math.PI * 2;
+    const r = 0.9 + hash2(i, 1, 72) * 0.7;
+    const x = t.x + Math.cos(a) * r;
+    const z = t.z + Math.sin(a) * r;
+    firewoodSpots.push({ x, z, y: terrainHeight(x, z), rot: hash2(i, 2, 73) * Math.PI * 2 });
+  }
+  return { firewoodSpots };
 }
 
 // ------------------------------------------------------------------- trees
@@ -88,6 +107,8 @@ function scatterTrees(scene, grid) {
       buildSpeciesInstances(scene, spots.filter((s) => s.species === 'dead'), assets.dead);
     })
     .catch((err) => console.error('Failed to load tree assets:', err));
+
+  return spots;
 }
 
 function buildSpeciesInstances(scene, spots, species) {

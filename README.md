@@ -56,8 +56,9 @@ not part of the running game — see the tree/lake design note below.
 1. **Crash site** — you start in a clearing at the origin beside the burning
    wreck. Scavenge it: rifle + magazines, compass, binoculars, rations.
 2. **Explore** — open meadow gives way to dense forest in every direction.
-   Gather fallen branches (firewood) as you go; they're scattered through
-   the woods rather than laid along a route.
+   Gather fallen branches (firewood) as you go — there's a pile at the foot
+   of roughly every fifth tree, so the woods themselves are the wood supply
+   rather than a handful of set-piece drops.
 3. **Stats tick down** — hunger, thirst and energy drain over time; warmth
    drops hard at night and at altitude. Empty bars bleed health. Eat rations
    (F) and build a campfire (T) before dark. Press E beside a lit fire to
@@ -277,6 +278,14 @@ Design notes:
   line-of-sight check — detection is radius-based.
 - Terrain collision is "walk anywhere" — steep slopes slow you down only
   visually; nothing stops you climbing the ridge ring except how tall it is.
+- Firewood (~250 piles, one under every fifth tree) shares a single
+  `InstancedMesh` per sub-mesh of the wood-pile GLB — three draw calls for
+  the lot. Building them the way the handful of crash-site pickups are
+  built (a `Group` plus a glow sprite each) would have been close to a
+  thousand draw calls for firewood alone; collecting one zeroes its
+  instance matrix instead of removing an object, and they deliberately skip
+  the loot pickups' glow sprite since the `[E]` prompt is discovery enough
+  for something this common.
 - Grass is one static `InstancedMesh` covering the whole play area, so its
   bounding sphere is always on screen and frustum culling never helps —
   every clump is submitted every frame (still just one draw call). A
@@ -314,14 +323,25 @@ Design notes:
   falls under gravity and is swept-raycast each frame so it can't tunnel
   through a wolf or the terrain between steps; a spark burst
   (`_spawnImpact`) marks wherever it actually lands. The gravity used isn't
-  real, though — a real .308 only drops centimeters over 100-400m, far too
-  subtle to read on any sane scope reticle, so `CONFIG.rifle.bulletGravity`
-  is instead solved backward from the reticle's own drawn geometry (each BDC
-  mark's angle, given the scope FOV and reticle-to-viewport scale) so that
-  ranging a target with the scope and holding the correct mark (mark 1 for
-  100m, mark 2 for 200m, etc.) lands the shot exactly on target — see the
-  comment above `CONFIG.rifle` for the derivation. That crosshair
-  (`scope-reticle.svg`) is a
+  real, though — a real .308 drops ~7cm over 100m, which is 0.04° of
+  holdover and invisible on any reticle — so `CONFIG.rifle.bulletGravity` is
+  solved backward from the reticle's own drawn geometry (the BDC ladder's
+  spacing, given the scope FOV and reticle-to-viewport scale) so that
+  ranging a target with the scope and holding the matching mark (mark 1 at
+  100m, 2 at 200m …) lands the shot exactly on target. Tightening that
+  ladder from 18 to 6 units per step cut the exaggeration from 36x real
+  gravity to 12x — the reticle's resolution is what caps how realistic the
+  drop can be while staying aimable, so the two are tuned together; see the
+  derivation above `CONFIG.rifle`.
+- The projectile step is the closed form for constant acceleration
+  (`x += v·dt + ½·g·dt²`, then `v += g·dt`) rather than plain Euler
+  (`v += g·dt` first, then `x += v·dt`). Euler biases the drop by `½·g·dt·t`,
+  which measured 0.12m low at 60fps and **0.25m low at 30fps** on a 100m
+  shot — the same hold landing somewhere else on a slower machine. The
+  closed form is exact for constant acceleration, so impact is
+  framerate-independent (verified: ≤2cm residual at both 30 and 60fps
+  across the whole ladder).
+- That crosshair (`scope-reticle.svg`) is a
   hand-authored vector reticle, not a stock asset — a real stock crosshair
   was tried first but its own baked-in vignette fought with the HUD's, so
   it was redrawn from scratch. The binoculars' vignette mask

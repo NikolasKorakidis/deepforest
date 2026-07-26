@@ -36,7 +36,7 @@ export class Level {
    *   — those items were already collected in a previous session).
    *  @param onQuestAdvance(stage) called right after questStage changes —
    *   Game.js uses this to autosave at each quest beat. */
-  constructor({ scene, grid, interactions, inventory, weapon, stats, hud, sfx, takenPickups, onQuestAdvance }) {
+  constructor({ scene, grid, interactions, inventory, weapon, stats, hud, sfx, takenPickups, onQuestAdvance, firewoodSpots }) {
     this.scene = scene;
     this.grid = grid;
     this.interactions = interactions;
@@ -47,6 +47,7 @@ export class Level {
     this.sfx = sfx;
     this.takenPickups = takenPickups || new Set();
     this.onQuestAdvance = onQuestAdvance || (() => {});
+    this.firewoodSpots = firewoodSpots || [];
 
     this.t = 0;
     this.pickupSprites = [];
@@ -288,38 +289,76 @@ export class Level {
   }
 
   // ------------------------------------------------------------------- wood
-  _makeWoodPileProp(rotY) {
-    const g = new THREE.Group();
-    g.rotation.y = rotY;
+  /**
+   * Fallen branches at the foot of every fifth tree (spots come from
+   * Vegetation.js, so they genuinely sit under trees rather than being
+   * scattered independently).
+   *
+   * There are a couple of hundred of these, which is far too many to build
+   * the way the handful of crash-site pickups are built: a Group per pile
+   * would mean ~3 draw calls each plus a glow sprite, i.e. close to a
+   * thousand draw calls for firewood alone. Instead every pile shares one
+   * InstancedMesh per sub-mesh of the GLB (3 draw calls total), and
+   * "removing" a collected pile means zeroing that instance's matrix. They
+   * also skip the glow sprite the loot pickups use — the [E] prompt is
+   * discovery enough for something this common, and 250 more sprites would
+   * put the draw calls straight back.
+   */
+  _placeWood() {
+    const live = (this.firewoodSpots || [])
+      .map((s, i) => ({ ...s, id: `wood${i}` }))
+      .filter((s) => !this.takenPickups.has(s.id));
+    if (live.length === 0) return;
+
+    this.woodParts = []; // InstancedMeshes, once the GLB resolves
+    const ZERO = new THREE.Matrix4().makeScale(0, 0, 0);
+
     loadGLTF(woodPileUrl)
       .then((gltf) => {
-        const model = normalizeModel(gltf.scene.clone(true), 1.2);
-        g.add(model);
+        const proto = normalizeModel(gltf.scene.clone(true), 1.2);
+        proto.updateMatrixWorld(true);
+
+        const dummy = new THREE.Object3D();
+        proto.traverse((o) => {
+          if (!o.isMesh) return;
+          // The mesh's transform *within* the normalized wrapper has to be
+          // folded into each instance matrix, since the InstancedMesh sits
+          // at the scene root with no parent transform of its own.
+          const local = o.matrixWorld.clone();
+          const inst = new THREE.InstancedMesh(o.geometry, o.material, live.length);
+          live.forEach((s, i) => {
+            dummy.position.set(s.x, s.y, s.z);
+            dummy.rotation.set(0, s.rot, 0);
+            dummy.updateMatrix();
+            inst.setMatrixAt(i, dummy.matrix.clone().multiply(local));
+          });
+          inst.instanceMatrix.needsUpdate = true;
+          inst.castShadow = true;
+          inst.receiveShadow = true;
+          this.scene.add(inst);
+          this.woodParts.push(inst);
+        });
       })
       .catch((err) => console.error('Failed to load wood pile model:', err));
-    return g;
-  }
 
-  /** Fallen branches scattered through the woods — placed deterministically
-   *  from the same hash the vegetation uses, at a spread of ranges from
-   *  spawn so there's always some within reach of wherever you camp. */
-  _placeWood() {
-    let placed = 0;
-    for (let i = 0; i < 200 && placed < 10; i++) {
-      const r = SPAWN_CLEARING_RADIUS + 6 + hash2(i, 0, 61) * 85;
-      const a = hash2(i, 1, 62) * Math.PI * 2;
-      const x = Math.cos(a) * r;
-      const z = Math.sin(a) * r;
-      if (Math.hypot(x - POND.x, z - POND.z) < POND_RADIUS + 6) continue;
-
-      this._addPickup(
-        this._makeWoodPileProp(hash2(i, 2, 63) * Math.PI * 2), x, z,
-        'Gather firewood (+2 wood)',
-        () => { this.inventory.wood += 2; },
-        { yOffset: 0, glowColor: 0xd8b475, id: `wood${i}` }
-      );
-      placed++;
-    }
+    // Interactions register immediately — gathering never waits on the GLB.
+    live.forEach((s, i) => {
+      this.interactions.add({
+        position: new THREE.Vector3(s.x, s.y, s.z),
+        radius: 2.4,
+        label: 'Gather firewood (+2 wood)',
+        onUse: (entry) => {
+          this.takenPickups.add(s.id);
+          this.inventory.wood += 2;
+          this.sfx.pickup();
+          entry.disabled = true;
+          for (const part of this.woodParts) {
+            part.setMatrixAt(i, ZERO);
+            part.instanceMatrix.needsUpdate = true;
+          }
+        },
+      });
+    });
   }
 
   // ------------------------------------------------------------------ lake

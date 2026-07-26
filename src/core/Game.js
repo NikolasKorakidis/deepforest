@@ -59,7 +59,9 @@ export class Game {
     this.grid = new SpatialGrid(8);
 
     this.scene.add(createTerrain());
-    scatterVegetation(this.scene, this.grid);
+    // Firewood is placed under a fraction of the scattered trees, so Level
+    // takes its spots from the vegetation pass rather than picking its own.
+    const { firewoodSpots } = scatterVegetation(this.scene, this.grid);
     this.env = new Environment(this.scene);
 
     this.stats = new PlayerStats();
@@ -86,6 +88,7 @@ export class Game {
       hud: this.hud, sfx: this.sfx,
       takenPickups: new Set(this.pendingSave?.takenPickups ?? []),
       onQuestAdvance: () => this.save(),
+      firewoodSpots,
     });
 
     this.kills = 0;

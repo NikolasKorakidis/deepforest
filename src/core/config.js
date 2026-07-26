@@ -49,18 +49,24 @@ export const CONFIG = {
     range: 150,
     // Bullet drop physics (see Weapon.js's _updateBullets). muzzleVelocity is
     // a real researched figure (168gr .308 Win Federal Gold Medal Match,
-    // 2650 fps). bulletGravity is NOT real gravity (9.81) — a real .308 only
-    // drops a few centimeters over 100-400m, far too subtle to read on a
-    // scope reticle at any sane magnification. Instead it's solved backward
-    // from the scope-reticle.svg BDC ladder's actual drawn geometry (mark
-    // N sits at angle θ_N = markOffsetUnits(N) * (66/200 reticle-to-vmin
-    // scale) * (26°/100 FOV-per-vh) above center, using vmin≈vh in
-    // landscape) via the small-angle drop relation θ(R) = 0.5·g·R/v², so
-    // that holding mark N on a target ranged at exactly 100·N meters (via
-    // the scope's own rangefinder) lands the shot dead-on. Recompute this
-    // if the reticle geometry, scope FOV, or muzzleVelocity ever changes.
+    // 2650 fps). bulletGravity is NOT real gravity — a real .308 drops only
+    // ~7cm over 100m, which is 0.04° of holdover: invisible on any reticle
+    // at any sane magnification. It's instead solved backward from the
+    // scope-reticle.svg BDC ladder's drawn geometry, so holding mark N on a
+    // target the scope ranges at 100·N metres lands the shot dead-on:
+    //
+    //   angle per reticle unit = (66/200 reticle-to-vmin) · (26°/100 FOV-per-vh)
+    //                          = 0.0858°            [vmin ≈ vh in landscape]
+    //   ladder spacing         = 6 units per 100 m  = 0.5148° at 100 m
+    //   small-angle drop       = tan θ = ½·g·R/v²
+    //   ⇒ g = 2·v²·tan θ / R  = 2·808²·0.0089852 / 100 ≈ 117
+    //
+    // At 12x real gravity that's still exaggerated, but it's a third of the
+    // 36x the old coarse 18-unit ladder forced — tightening the ladder is
+    // what bought the realism. Recompute this if the ladder spacing, the
+    // reticle's on-screen size, the scope FOV or muzzleVelocity change.
     muzzleVelocity: 808,
-    bulletGravity: 352,
+    bulletGravity: 117,
     bulletLifetime: 4, // seconds before an unresolved shot is given up on
   },
 
