@@ -12,9 +12,9 @@ export class PlayerController {
     this.grid = grid;
     this.stats = stats;
 
-    this.position = new THREE.Vector3(4, 0, 14);
+    this.position = new THREE.Vector3(7, 0, 9);
     this.position.y = terrainHeight(this.position.x, this.position.z);
-    this.yaw = 0.28; // facing the wreck
+    this.yaw = 1.07; // facing the wreck across the spawn clearing
     this.pitch = 0;
     this.vel = new THREE.Vector3();
     this.bobTime = 0;

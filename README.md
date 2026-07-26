@@ -1,21 +1,25 @@
 # Deep Forest
 
 A browser-based first-person survival slice built with **Three.js** and **Vite**.
-You wake beside a crashed helicopter in a remote valley — injured, cold and
-hungry — and must follow the valley north to a trail marker while managing
-survival stats, building fires to get through the freezing nights, and
-surviving the wolves.
+You wake beside a crashed helicopter in a forested wilderness basin — injured,
+cold and hungry — and have to find water, get a fire going before nightfall,
+and survive the wolves that hold the lake.
 
-The world is mostly procedural or primitive-based, with a growing number of
-real external assets. In `src/assets/models/`, loaded at runtime with
-three.js's `GLTFLoader`: the crashed-helicopter model, an animated
-first-person hands+rifle rig (the held viewmodel), a simpler rifle model for
-the ground pickup only, the animated wolf, a real low-poly tree model (forest
-+ lake), and a wood pile that replaced the old primitive log/branch mesh for
-gatherable firewood. Two more external assets, a sniper crosshair and a
-binoculars mask, are 2D textures (`src/assets/textures/`) composited into the
-HUD rather than 3D models —
-see the aiming note below.
+The world is generated procedurally from a single deterministic height
+function: rolling forested hills, meadows and dense woodland, a lake off to
+the north-east, and a ring of steep ridges that fences the play area in
+without invisible walls. Nothing about the layout is stored — the same
+wilderness regenerates identically on every load.
+
+Terrain, grass, water and every texture in the world are generated at
+runtime — there are no external image assets. The models are the exception:
+in `src/assets/models/`, loaded with three.js's `GLTFLoader`, are the
+crashed-helicopter, an animated first-person hands+rifle rig (the held
+viewmodel), a simpler rifle for the ground pickup, the animated wolf, the
+low-poly trees the forest instances, and a wood pile for gatherable
+firewood. Two 2D textures (`src/assets/textures/`) — a sniper crosshair and
+a binoculars mask — are composited into the HUD rather than the scene; see
+the aiming note below.
 
 ## Run it
 
@@ -49,34 +53,33 @@ not part of the running game — see the tree/lake design note below.
 
 ## Gameplay loop
 
-1. **Crash site** — scavenge the wreck: rifle + 2 magazines, compass,
-   binoculars, and a ration pack.
-2. **Head north** — the dirt path winds up the valley. Gather fallen branches
-   (firewood) as you go.
+1. **Crash site** — you start in a clearing at the origin beside the burning
+   wreck. Scavenge it: rifle + magazines, compass, binoculars, rations.
+2. **Explore** — open meadow gives way to dense forest in every direction.
+   Gather fallen branches (firewood) as you go; they're scattered through
+   the woods rather than laid along a route.
 3. **Stats tick down** — hunger, thirst and energy drain over time; warmth
    drops hard at night and at altitude. Empty bars bleed health. Eat rations
    (F) and build a campfire (T) before dark. Press E beside a lit fire to
    open a cook/sleep wheel: Cook (eat a ration for a bigger restore than raw,
    if you have one) or Sleep (skips to first light — only available once
    it's dim enough out; burns the fire down to embers).
-4. **The quest chain** — find survivors (the rifle at the second wreck) →
-   find water (drink at the lake halfway up the valley) → build a campfire →
-   sleep until dawn. Autosaves at each beat (see Saving, below).
-5. **Wolves** — two dens ring the lake, guarding the water the quest sends
-   you to. Wolves wander/sit near home, detect you at range (farther at
-   night — watch for the eyes), close in at a run, then drop to a stalking
-   creep right before lunging. Body shots take two hits to put one down; a
-   headshot drops one instantly regardless of remaining health. You can
-   also just outrun them.
-6. **The trail marker** — an orange flag at the head of the valley ends the
+4. **The quest chain** — find water (drink at the lake, ~80m north-east) →
+   build a campfire → sleep until dawn. Autosaves at each beat (see Saving).
+5. **Wolves** — two dens sit past the lake's treeline, on the far side from
+   the shore you drink at, so they're something you notice at the water
+   rather than blunder into on the way. They aggro at 20m (day or night),
+   close in at a run, then drop to a stalking creep right before lunging.
+   Body shots take two hits to put one down; a headshot drops one instantly
+   regardless of remaining health. You can also just outrun them.
+6. **The marker** — an orange flag on a rise beyond the forest ends the
    slice (~15–25 minutes for a focused run; slower if you explore).
 
 ## Saving
 
-The game autosaves to `localStorage` at each of the four quest beats
-(finding the rifle, finding water, building a campfire, sleeping until dawn)
-— no manual save action. Reloading the page offers **Continue** (restores
-position,
+The game autosaves to `localStorage` at each of the three quest beats
+(finding water, building a campfire, sleeping until dawn) — no manual save
+action. Reloading the page offers **Continue** (restores position,
 stats, inventory, ammo, quest stage, day/time, and any campfires still
 burning — collected pickups stay collected) or **New Game** (discards the
 save). The save is also cleared on death or reaching the trail marker, since
@@ -102,7 +105,7 @@ src/
   world/
     heightfield.js        the terrain function — single source of truth for ground height
     Terrain.js            terrain mesh + vertex-color painting
-    Vegetation.js         instanced trees/rocks, registered as colliders
+    Vegetation.js         instanced trees/grass/rocks; trees+rocks are colliders
     TreeAssets.js         extracts tree species from tree_assets.glb
     Water.js              reflective lake surface + shoreline blend (see design note below)
     Environment.js        day-night cycle: sun/moon, sky, fog, stars
@@ -127,6 +130,39 @@ Design notes:
 - `heightfield.js` is pure math (no three.js). The mesh, the player, the
   wolves, item placement and vegetation all sample the same function, so
   nothing ever floats or sinks.
+- The world is one deterministic function of `(x, z)` — three octaves of
+  value-noise for the landforms, plus analytic features layered on top (the
+  ridge ring that fences the basin, the flattened spawn clearing, the lake
+  bed). A second, independently-seeded noise field, `forestDensity(x, z)`,
+  decides how thick the woods are, and *both* the tree scatter and the
+  ground tint read from it — so dense woodland genuinely looks dense from
+  the canopy and from the forest floor, and clearings are real clearings
+  rather than a coincidence of two unrelated random fields.
+- The lake bed is deliberately **not** noise minus a bowl — it's an analytic
+  bowl that overrides the terrain near the water. With a noisy bed the
+  ground wanders above and below the water level around the rim, so the
+  water plane's edge ends up hanging over ground that's still below it in
+  some directions and buried in others — the classic "lake is a disc
+  floating on the map" seam. Here `POND_WATER_Y` is *defined* as the bed
+  height at exactly `POND_RADIUS`, which makes `terrainHeight == waterY`
+  hold to the millimetre all the way around the shore. (Verified
+  numerically rather than by eye: sampling 64 points around the waterline
+  gives min == max == `POND_WATER_Y`.)
+- Grass is "paper" grass: instanced clumps of three alpha-cut cards at
+  0/60/120°, so a clump still reads as volume from any angle instead of
+  vanishing edge-on. The blade silhouette is drawn procedurally to a canvas
+  at startup (no external image assets, same as `glow.js`, `Water.js` and
+  `particleTextures.js`). It uses `alphaTest` rather than blending on
+  purpose — overlapping blended cards would need per-frame depth sorting
+  that `InstancedMesh` can't do. Wind sway is a vertex-shader offset keyed
+  off `uv.y²` (so blades bend from the root, not slide sideways) with the
+  phase derived from each instance's own position out of `instanceMatrix`,
+  which makes the field ripple instead of swaying in lockstep. Normals
+  point straight up rather than out of the card, so grass is lit like the
+  ground it grows from instead of half the cards going black. The scatter
+  filters are ordered cheapest-first — `slopeAt()` costs four
+  `terrainHeight()` evaluations, so it runs last, after the cheap
+  rejections; the whole 38k-clump scatter measures ~20ms at startup.
 - Collision is 2D circle push-out against a spatial hash of static obstacles —
   no physics engine needed at this scope.
 - All balance lives in `core/config.js`.
@@ -240,7 +276,12 @@ Design notes:
 - Wolves ignore obstacles (they can walk through trees) and have no
   line-of-sight check — detection is radius-based.
 - Terrain collision is "walk anywhere" — steep slopes slow you down only
-  visually; there is no cliff blocking beyond the valley walls being tall.
+  visually; nothing stops you climbing the ridge ring except how tall it is.
+- Grass is one static `InstancedMesh` covering the whole play area, so its
+  bounding sphere is always on screen and frustum culling never helps —
+  every clump is submitted every frame (still just one draw call). A
+  chunked or player-following field would be the fix if it ever costs too
+  much; `GRASS_BUDGET` in `Vegetation.js` is the quick knob.
 - Campfires can be built on any ground, including steep or wet spots.
 - The pond is the only water source; no waterborne risk, no bottles. It's
   solid rather than swimmable — there's no underwater world/effect, so
@@ -305,9 +346,11 @@ Design notes:
 
 ## Suggested next steps
 
-- **World**: extend past the marker — mountain pass (exposure/wind), second
-  forest, abandoned village, extraction. The path/heightfield approach
-  extends by adding segments to `pathX`/`climb`.
+- **World**: more biomes inside (or beyond) the ridge ring — a marsh, a
+  burnt-out stand, an abandoned village. `heightfield.js` composes the
+  terrain from independent analytic features layered onto the noise (the
+  ridge ring, the spawn clearing, the lake bed), so a new landmark is
+  another such term plus a matching `forestDensity` carve-out.
 - **Wildlife**: birds (ambience), foxes (flee/steal), and a bear miniboss
   (see the TODO in `entities/Wolf.js` — the state machine generalizes).
 - **Weather**: snow/rain fronts driving warmth and visibility.

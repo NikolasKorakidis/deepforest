@@ -69,8 +69,11 @@ export const CONFIG = {
     headshotRadius: 0.35,    // world units around the head bone counted as a headshot
     chaseSpeed: 6.1,
     wanderSpeed: 1.7,
-    detectRadiusDay: 24,
-    detectRadiusNight: 30,
+    // 20m aggro. Night is unchanged rather than longer: the wolves guard a
+    // fixed spot (the lake) now, so a wider night radius would just mean
+    // being ambushed before the lake is even visible.
+    detectRadiusDay: 20,
+    detectRadiusNight: 20,
     crouchDetectMult: 0.65, // sneaking narrows how far a wolf notices you
     proneDetectMult: 0.4,
     giveUpRadius: 55,

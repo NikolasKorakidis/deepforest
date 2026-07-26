@@ -4,7 +4,7 @@ import { Input } from './Input.js';
 import { SFX } from './sfx.js';
 import { SpatialGrid } from './SpatialGrid.js';
 import { createTerrain } from '../world/Terrain.js';
-import { scatterVegetation } from '../world/Vegetation.js';
+import { scatterVegetation, updateVegetation } from '../world/Vegetation.js';
 import { Environment } from '../world/Environment.js';
 import { Level } from '../world/Level.js';
 import { PlayerStats } from '../player/PlayerStats.js';
@@ -179,7 +179,10 @@ export class Game {
     const dt = Math.min(0.05, this.clock.getDelta());
     if (this.state === 'playing') this.update(dt);
     if (this.state === 'loading') this.hud.setLoadingProgress(loadProgress());
-    this.level.update(dt, this.env.sun); // ambient animation keeps running on menus
+    // Ambient animation keeps running on menus, so the start screen has a
+    // living world behind it rather than a freeze-frame.
+    this.level.update(dt, this.env.sun);
+    updateVegetation(dt); // grass wind
     this.renderer.render(this.scene, this.camera);
   }
 

@@ -269,13 +269,14 @@ export class Wolf {
 }
 
 /** Wolf territory: the lake. Tied to the "find water" quest beat — the
- *  danger is exactly where that objective sends the player, not scattered
- *  the whole length of the route. Both dens sit just past the lake's own
- *  treeline (clear of the water and of the path-facing approach shore —
- *  see Level.js's _buildLakeTrees for that same clearance math). */
-export function wolfSpawnPoints(pathXFn, pond) {
+ *  danger is exactly where that objective sends the player, rather than
+ *  scattered across the whole map. Both dens sit just past the lake's own
+ *  treeline, on the far side from the approach shore the player walks up
+ *  to drink from, so they're something you notice at the water rather than
+ *  something you blunder into on the way. */
+export function wolfSpawnPoints(pond) {
   return [
-    { x: pond.x + 4, z: pond.z + 20 },   // north shore
-    { x: pond.x + 16, z: pond.z - 14 },  // south-east shore
+    { x: pond.x + 19, z: pond.z + 9 },
+    { x: pond.x + 11, z: pond.z - 19 },
   ];
 }
