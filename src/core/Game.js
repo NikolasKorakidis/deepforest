@@ -96,6 +96,7 @@ export class Game {
       takenPickups: new Set(this.pendingSave?.takenPickups ?? []),
       onQuestAdvance: () => this.save(),
       firewoodSpots,
+      onWolfSighting: () => this.playWolfSighting(),
     });
 
     this.kills = 0;
@@ -148,7 +149,7 @@ export class Game {
           this.sfx.resume();
           this.input.lock();
           this.state = 'playing';
-          this.hud.setObjective('Look for survivors');
+          this.level.refreshObjective();
           this.hud.toast('Your head pounds. The helicopter still burns behind you.', 5000);
           setTimeout(() => this.hud.toast('No one answers your calls. Search the crash site.', 5000), 4000);
           setTimeout(() => this.hud.toast('Then follow the valley north — into the dark.', 5000), 8500);
@@ -188,10 +189,11 @@ export class Game {
   frame() {
     const dt = Math.min(0.05, this.clock.getDelta());
     if (this.state === 'playing') this.update(dt);
+    if (this.state === 'cutscene') this.updateCutscene(dt);
     if (this.state === 'loading') this.hud.setLoadingProgress(loadProgress());
     // Ambient animation keeps running on menus, so the start screen has a
     // living world behind it rather than a freeze-frame.
-    this.level.update(dt, this.env.sun);
+    this.level.update(dt, this.env.sun, this.controller.position);
     updateVegetation(dt, this.camera.position); // grass wind + chunk culling
     this.perf.update(dt);
     this.renderer.render(this.scene, this.camera);
@@ -248,6 +250,88 @@ export class Game {
     else if (this.controller.position.distanceTo(this.level.checkpoint) < 5) this.finish();
   }
 
+  // -------------------------------------------------------------- cutscene
+  /**
+   * The one scripted beat: nearing the lake for the first time, the player
+   * raises the binoculars and finds a wolf watching from across the water.
+   *
+   * Implemented as a `state` the main loop drives rather than a timeline or
+   * a promise chain, because `state !== 'playing'` already freezes the
+   * simulation everywhere else — the player can't move, wolves can't close
+   * in, stats don't tick — which is exactly what a cutscene needs, for free.
+   */
+  playWolfSighting() {
+    if (this.state !== 'playing') return;
+    // Nearest living wolf, so the shot frames whichever one the player is
+    // actually about to walk into rather than whichever happens to be first.
+    const here = this.controller.position;
+    const wolf = this.wolves
+      .filter((w) => !w.dead)
+      .sort((a, b) => a.pos.distanceToSquared(here) - b.pos.distanceToSquared(here))[0];
+    if (!wolf) return; // nothing to look at; skip rather than stage an empty shot
+
+    this.state = 'cutscene';
+    this.cutscene = {
+      t: 0,
+      target: wolf.pos.clone(),
+      prevEquipped: this.weapon.equipped,
+    };
+    if (this.inventory.hasBinoculars) {
+      this.weapon.equip('binoculars');
+      this.weapon.aiming = true; // drives the FOV zoom and the lens mask
+    }
+    this.hud.setPrompt(null);
+    this.hud.toast('You raise the binoculars.', 3000);
+  }
+
+  updateCutscene(dt) {
+    const c = this.cutscene;
+    c.t += dt;
+
+    // Pointer lock stays on through the cutscene, so the mouse keeps
+    // accumulating deltas that nothing is reading (PlayerController.update
+    // is the only consumer and the sim is frozen). Drain and discard them,
+    // or every bit of mouse movement made during the scene is applied in
+    // one jolt the instant control comes back.
+    this.input.consumeMouseDelta();
+
+    // Turn to face the wolf. Writing the controller's own yaw/pitch (rather
+    // than the camera's rotation directly) means that when control comes
+    // back the player is simply looking where the camera ended up, with no
+    // snap.
+    const cam = this.camera;
+    const dx = c.target.x - cam.position.x;
+    const dz = c.target.z - cam.position.z;
+    const dy = (c.target.y + 0.7) - cam.position.y;
+    const wantYaw = Math.atan2(-dx, -dz);
+    const wantPitch = Math.atan2(dy, Math.hypot(dx, dz));
+
+    let dyaw = wantYaw - this.controller.yaw;
+    while (dyaw > Math.PI) dyaw -= Math.PI * 2;
+    while (dyaw < -Math.PI) dyaw += Math.PI * 2;
+
+    const k = Math.min(1, dt * 2.6);
+    this.controller.yaw += dyaw * k;
+    this.controller.pitch += (wantPitch - this.controller.pitch) * k;
+    cam.rotation.set(this.controller.pitch, this.controller.yaw, 0);
+
+    // Keeps the FOV zoom and binocular mask animating — Weapon.update is
+    // what owns both, and it's safe to run with the sim otherwise frozen.
+    this.weapon.update(dt);
+
+    if (c.t > 1.6 && !c.spoke) {
+      c.spoke = true;
+      this.hud.toast("A wolf, across the water. It hasn't moved.", 4500);
+    }
+
+    if (c.t > 5) {
+      this.weapon.aiming = false;
+      this.weapon.equip(c.prevEquipped);
+      this.cutscene = null;
+      this.state = 'playing';
+    }
+  }
+
   warn(key, condition, message, cooldownSec = 45) {
     if (!condition) return;
     const until = this.warnCooldowns.get(key) || 0;
@@ -276,7 +360,9 @@ export class Game {
   async openCampfireMenu(fire) {
     if (this.state !== 'playing') return;
     const canCook = this.inventory.rations > 0;
-    const canSleep = this.env.daylight <= 0.5;
+    // Normally you can only sleep once it's dim, but not when the quest is
+    // actively asking for it — see Level.questWantsSleep.
+    const canSleep = this.env.daylight <= 0.5 || this.level.questWantsSleep;
 
     this.state = 'menu';
     document.exitPointerLock();
@@ -303,7 +389,7 @@ export class Game {
   }
 
   async sleepAtFire(fire) {
-    if (this.env.daylight > 0.5) {
+    if (this.env.daylight > 0.5 && !this.level.questWantsSleep) {
       this.hud.toast('It is too bright to sleep. Wait for evening.');
       return;
     }
@@ -404,8 +490,9 @@ export class Game {
     this.kills = data.kills;
 
     this.level.questStage = data.questStage;
-    const { text, complete } = Level.objectiveForStage(data.questStage);
-    this.hud.setObjective(text, complete);
+    // Rebuilds the line from live state, so restored counters ("2/4",
+    // "1/3 wood") are correct rather than frozen at whatever they were.
+    this.level.refreshObjective();
 
     for (const f of data.campfires) this.campfires.rebuild(f.x, f.z, f.fuel, this.hud);
   }

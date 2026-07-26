@@ -4,11 +4,11 @@
 // fields into a newer Game.
 
 const KEY = 'deepforest-save';
-// v3: the world was regenerated from scratch (new terrain, new lake and
-// pickup positions) and the quest chain lost its opening "find survivors"
-// beat, so both saved coordinates and saved quest stages from older runs
-// would land somewhere meaningless.
-const SAVE_VERSION = 3;
+// v4: quest chain reordered and renumbered (investigate the crash -> fire
+// -> sleep -> water), and the separate ammo pickup was folded into the
+// rifle — so an old save's questStage means something different and its
+// takenPickups can name an item that no longer exists.
+const SAVE_VERSION = 4;
 
 export function saveGame(data) {
   try {

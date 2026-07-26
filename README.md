@@ -63,10 +63,20 @@ not part of the running game — see the tree/lake design note below.
    drops hard at night and at altitude. Empty bars bleed health. Eat rations
    (F) and build a campfire (T) before dark. Press E beside a lit fire to
    open a cook/sleep wheel: Cook (eat a ration for a bigger restore than raw,
-   if you have one) or Sleep (skips to first light — only available once
-   it's dim enough out; burns the fire down to embers).
-4. **The quest chain** — find water (drink at the lake, ~80m north-east) →
-   build a campfire → sleep until dawn. Autosaves at each beat (see Saving).
+   if you have one) or Sleep (wakes you at midday; burns the fire down to
+   embers). Sleeping normally needs it to be dim out — except while the
+   quest is asking for it, so the chain can't stall you until evening.
+4. **The quest chain**, tracked top-left with live counters:
+   1. **Investigate the crash** `0/4` — the rifle (with its magazines),
+      compass, binoculars and rations, scattered around the wreck.
+   2. **Build a fire** `0/3 wood` — the counter follows what you're
+      carrying, hinting you into the woods for branches.
+   3. **Sleep** — at the fire you just built. You wake at 12:00.
+   4. **Find water** — nearing the lake triggers the one scripted beat: you
+      raise the binoculars and find a wolf watching from across the water.
+      Drinking completes the chain.
+
+   Autosaves at each beat (see Saving).
 5. **Wolves** — two dens sit past the lake's treeline, on the far side from
    the shore you drink at, so they're something you notice at the water
    rather than blunder into on the way. They aggro at 20m (day or night),
@@ -78,8 +88,7 @@ not part of the running game — see the tree/lake design note below.
 
 ## Saving
 
-The game autosaves to `localStorage` at each of the three quest beats
-(finding water, building a campfire, sleeping until dawn) — no manual save
+The game autosaves to `localStorage` at each quest beat — no manual save
 action. Reloading the page offers **Continue** (restores position,
 stats, inventory, ammo, quest stage, day/time, and any campfires still
 burning — collected pickups stay collected) or **New Game** (discards the
@@ -177,6 +186,25 @@ reason — without it a shot across a meadow stops on the first blade in front
 of the muzzle and the rangefinder reads one metre instead of the hillside.
 
 Design notes:
+
+- Objective text is regenerated from live state every time
+  (`Level.refreshObjective`) rather than written once at each transition.
+  That's what lets a counter tick as you pick things up, and it means a
+  restored save shows the right line — including the right counter — without
+  having to persist the text or replay the transition messages. The counters
+  themselves are derived, not stored: "investigate the crash" counts how many
+  of `CRASH_ITEMS` are in `takenPickups` (already saved for respawn
+  suppression), so there's no second copy of that state to drift.
+- The wolf sighting is a `state = 'cutscene'` the main loop drives, not a
+  timeline or promise chain. Everything else in the game already keys off
+  `state !== 'playing'` to freeze — the player can't move, wolves can't
+  close in, stats stop ticking, menus won't open — so a cutscene gets all of
+  that for free. It writes the *controller's* yaw/pitch rather than the
+  camera's rotation, so when control returns the player is simply looking
+  where the camera ended up with no snap, and it drains
+  `input.consumeMouseDelta()` every frame — pointer lock stays on, so
+  otherwise a scene's worth of unread mouse movement lands in one jolt the
+  instant it ends.
 
 - `heightfield.js` is pure math (no three.js). The mesh, the player, the
   wolves, item placement and vegetation all sample the same function, so

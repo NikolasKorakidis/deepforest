@@ -159,11 +159,30 @@ export class HUD {
   }
 
   // -------------------------------------------------------------- objective
-  setObjective(text, complete = false) {
+  /**
+   * @param text     the objective line itself, counter included
+   *   ("Investigate the crash  2/4").
+   * @param complete ticks and greens it out.
+   * @param note     optional smaller hint line underneath ("Look in the
+   *   forest for wood") — where to go / what to do, as opposed to what.
+   */
+  setObjective(text, complete = false, note = null) {
     const el = this.el('objective');
     el.classList.toggle('hidden', !text);
     el.classList.toggle('complete', complete);
-    if (text) el.textContent = (complete ? '✓ ' : '▸ ') + text;
+    if (!text) return;
+
+    el.textContent = '';
+    const main = document.createElement('div');
+    main.className = 'objective-main';
+    main.textContent = (complete ? '✓ ' : '▸ ') + text;
+    el.appendChild(main);
+    if (note) {
+      const hint = document.createElement('div');
+      hint.className = 'objective-note';
+      hint.textContent = note;
+      el.appendChild(hint);
+    }
   }
 
   // --------------------------------------------------------------- compass

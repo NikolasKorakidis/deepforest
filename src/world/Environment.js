@@ -144,14 +144,14 @@ export class Environment {
     return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
   }
 
-  /** Jump to the next morning (used by sleeping at a campfire). Lands just
-   *  past the sunrise threshold (time=0.25 is exactly horizon) — early
-   *  enough that the sun is barely up and the sky still carries a warm
-   *  dawn tint, rather than mid-morning full daylight. */
+  /** Jump forward to waking time (used by sleeping at a campfire). */
   skipToMorning() {
-    const DAWN = 0.26;
-    if (this.time > DAWN) this.day++;
-    this.time = DAWN;
+    // Wakes at midday rather than first light: you sleep off the night the
+    // fire was built for, and come to with the sun high and a full day to
+    // work with. (time is a fraction of a day, so 0.5 == 12:00.)
+    const WAKE = 0.5;
+    if (this.time > WAKE) this.day++;
+    this.time = WAKE;
   }
 
   update(dt, playerPos) {
