@@ -15,7 +15,7 @@ import { InteractionSystem } from '../systems/Interaction.js';
 import { CampfireSystem } from '../systems/Campfire.js';
 import { Inventory } from '../items/Inventory.js';
 import { HUD } from '../ui/HUD.js';
-import { clamp } from '../world/heightfield.js';
+import { clamp, terrainHeight, POND, POND_RADIUS } from '../world/heightfield.js';
 import { saveGame, loadGame, clearSave } from './save.js';
 import { PerfScaler } from './PerfScaler.js';
 import { allAssetsSettled, loadProgress } from './assets.js';
@@ -260,20 +260,73 @@ export class Game {
    * simulation everywhere else — the player can't move, wolves can't close
    * in, stats don't tick — which is exactly what a cutscene needs, for free.
    */
+  /** True if nothing solid stands between two world points. */
+  hasLineOfSight(from, to) {
+    const dir = new THREE.Vector3().subVectors(to, from);
+    const dist = dir.length();
+    if (dist < 0.1) return true;
+    dir.divideScalar(dist);
+
+    if (!this._losRay) {
+      this._losRay = new THREE.Raycaster();
+      this._losRay.camera = this.camera; // Sprite.raycast throws without it
+    }
+    this._losRay.set(from, dir);
+    this._losRay.far = dist - 1.5; // stop short so the target itself isn't the blocker
+    const targets = this.scene.children.filter((o) => o !== this.camera);
+    return !this._losRay
+      .intersectObjects(targets, true)
+      .some((h) => !h.object.isSprite && !h.object.isPoints);
+  }
+
+  /**
+   * @returns true if the scene actually played. The caller keeps asking
+   *   until it does, because the whole point is that the wolf is *seen* —
+   *   firing it blind while a trunk fills the screen is worse than waiting.
+   */
   playWolfSighting() {
-    if (this.state !== 'playing') return;
-    // Nearest living wolf, so the shot frames whichever one the player is
-    // actually about to walk into rather than whichever happens to be first.
+    if (this.state !== 'playing') return false;
     const here = this.controller.position;
-    const wolf = this.wolves
-      .filter((w) => !w.dead)
-      .sort((a, b) => a.pos.distanceToSquared(here) - b.pos.distanceToSquared(here))[0];
-    if (!wolf) return; // nothing to look at; skip rather than stage an empty shot
+    const alive = this.wolves.filter((w) => !w.dead);
+    if (alive.length === 0) return false; // nothing to look at; don't stage an empty shot
+
+    // The chosen wolf gets moved into place, so prefer one the player can't
+    // currently see — otherwise they might catch it vanishing. Falls back to
+    // the farthest, which is the least likely to be under scrutiny.
+    const eyeNow = this.camera.position;
+    const unseen = alive.filter(
+      (w) => !this.hasLineOfSight(eyeNow, new THREE.Vector3(w.pos.x, w.pos.y + 0.9, w.pos.z))
+    );
+    const pool = unseen.length > 0 ? unseen : alive;
+    const wolf = pool.sort(
+      (a, b) => b.pos.distanceToSquared(here) - a.pos.distanceToSquared(here)
+    )[0];
+
+    // Stage it on the far shore, directly across the lake on the player's
+    // own sightline. The forest is what was hiding the wolf, and the one
+    // direction guaranteed to have no forest in it is straight over open
+    // water — so rather than fight the occlusion, put the wolf where the
+    // occlusion can't be. It reads as "across the water" too, which is what
+    // the moment is meant to be.
+    const toLakeX = POND.x - here.x;
+    const toLakeZ = POND.z - here.z;
+    const len = Math.hypot(toLakeX, toLakeZ) || 1;
+    const farX = POND.x + (toLakeX / len) * (POND_RADIUS + 3);
+    const farZ = POND.z + (toLakeZ / len) * (POND_RADIUS + 3);
+    const stage = new THREE.Vector3(farX, terrainHeight(farX, farZ), farZ);
+
+    const eye = this.camera.position;
+    if (!this.hasLineOfSight(eye, new THREE.Vector3(stage.x, stage.y + 0.9, stage.z))) {
+      return false; // still screened by trees or a rise — try again shortly
+    }
+
+    wolf.pos.copy(stage);
+    wolf.group.position.copy(stage);
 
     this.state = 'cutscene';
     this.cutscene = {
       t: 0,
-      target: wolf.pos.clone(),
+      target: stage.clone(),
       prevEquipped: this.weapon.equipped,
     };
     if (this.inventory.hasBinoculars) {
@@ -282,6 +335,7 @@ export class Game {
     }
     this.hud.setPrompt(null);
     this.hud.toast('You raise the binoculars.', 3000);
+    return true;
   }
 
   updateCutscene(dt) {

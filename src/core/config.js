@@ -86,6 +86,17 @@ export const CONFIG = {
     attackRange: 2.4,
     attackCooldown: 1.5,
     damage: 14,
+    woundedSpeedMult: 0.45, // after surviving a body shot, until finished off
+    // Death throw. There's no death clip in the wolf GLB, so rather than a
+    // bad imitation of one the corpse gets launched along the bullet's path
+    // and tumbles away.
+    ragdoll: {
+      launchSpeed: 24,  // along the shot direction
+      launchUp: 15,
+      gravity: 26,      // heavier than real, so the arc stays readable
+      bounce: 0.55,
+      despawnSec: 12,
+    },
   },
 
   fire: {

@@ -283,8 +283,10 @@ export class Weapon {
         if (obj && obj.userData.wolfRef) {
           const wolf = obj.userData.wolfRef;
           // Headshots always drop a wolf outright, regardless of remaining
-          // health — everywhere else takes CONFIG.wolf.health hits (2).
-          wolf.takeDamage(wolf.isHeadshot(hit.point) ? Infinity : 1);
+          // health — everywhere else takes CONFIG.wolf.health hits (2), the
+          // first of which leaves it wounded and slowed. `segment` is the
+          // bullet's unit direction, which the corpse is thrown along.
+          wolf.takeDamage(wolf.isHeadshot(hit.point) ? Infinity : 1, segment);
           this.hud.hitmarker();
         }
         this._spawnImpact(hit.point);

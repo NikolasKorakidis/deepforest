@@ -77,12 +77,14 @@ not part of the running game — see the tree/lake design note below.
       Drinking completes the chain.
 
    Autosaves at each beat (see Saving).
-5. **Wolves** — two dens sit past the lake's treeline, on the far side from
-   the shore you drink at, so they're something you notice at the water
-   rather than blunder into on the way. They aggro at 20m (day or night),
-   close in at a run, then drop to a stalking creep right before lunging.
-   Body shots take two hits to put one down; a headshot drops one instantly
-   regardless of remaining health. You can also just outrun them.
+5. **Wolves** — four dens ring the lake, spread across the half of the shore
+   away from the approach you walk in on, so the water is contested ground
+   rather than an ambush the moment you arrive. They aggro at 20m (day or
+   night), close in at a run, then drop to a stalking creep before lunging,
+   and they path *around* the lake rather than trotting across it. A
+   headshot drops one instantly; a body shot leaves it wounded and visibly
+   slowed, and the next shot finishes it. You can also just outrun them —
+   easily, once one is wounded.
 6. **The marker** — an orange flag on a rise beyond the forest ends the
    slice (~15–25 minutes for a focused run; slower if you explore).
 
@@ -195,6 +197,18 @@ Design notes:
   themselves are derived, not stored: "investigate the crash" counts how many
   of `CRASH_ITEMS` are in `takenPickups` (already saved for respawn
   suppression), so there's no second copy of that state to drift.
+- Getting the player to actually *see* the wolf in that sighting took two
+  changes, because the forest is dense enough that a wolf at its den is
+  usually behind a trunk. First, the wolf is staged on the far shore
+  directly along the player's own sightline to the lake — straight over open
+  water is the one direction guaranteed to have no forest in it, so instead
+  of fighting the occlusion the shot is placed where occlusion can't happen
+  (and "across the water" is what the moment wants to say anyway). Second,
+  the trigger is a *request*, not an event: `Level` asks every 0.3s while
+  the player is near the lake and only marks it done when `Game` reports it
+  actually played, which it declines to do unless a raycast confirms a clear
+  line of sight. The wolf chosen to be moved is preferentially one the
+  player currently *can't* see, so nobody catches it teleporting.
 - The wolf sighting is a `state = 'cutscene'` the main loop drives, not a
   timeline or promise chain. Everything else in the game already keys off
   `state !== 'playing'` to freeze — the player can't move, wolves can't
@@ -353,7 +367,10 @@ Design notes:
 ## Known limitations
 
 - Wolves ignore obstacles (they can walk through trees) and have no
-  line-of-sight check — detection is radius-based.
+  line-of-sight check — detection is radius-based. The lake is the one
+  exception: it's a hole in their walkable space that they steer around
+  (`avoidLake` in `Wolf.js`), because "shoot a wolf, watch it swim at you"
+  was too conspicuous to leave. Everything else they walk through.
 - Terrain collision is "walk anywhere" — steep slopes slow you down only
   visually; nothing stops you climbing the ridge ring except how tall it is.
 - Firewood (~250 piles, one under every fifth tree) shares a single
@@ -379,8 +396,12 @@ Design notes:
   console warning and falls back to the base PBR values, so the model
   renders correctly but not with the exact specular look the source file
   intended.
-- No death animation clip — a killed wolf just tips over (Z-axis rotation)
-  and freezes rather than ragdolling or playing a proper death pose.
+- There's no death clip in the wolf GLB. Rather than imitate one badly (it
+  used to just tip over on its side and freeze), a killed wolf is launched
+  along the bullet's path and tumbles away, bouncing off the terrain, before
+  despawning — a deliberate swing to slapstick, since the honest options
+  were "bad" or "silly". Tuned in `CONFIG.wolf.ragdoll`; it's a single rigid
+  body keeping its last animated pose, not a real jointed ragdoll.
 - Only 2 tree species + 1 dead variant come from the source diorama, reused
   everywhere — real-world forests have more variety, and up close the
   repetition is a bit more noticeable than with the old fully-procedural

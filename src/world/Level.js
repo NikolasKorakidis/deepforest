@@ -62,8 +62,9 @@ export class Level {
     this.takenPickups = takenPickups || new Set();
     this.onQuestAdvance = onQuestAdvance || (() => {});
     this.firewoodSpots = firewoodSpots || [];
-    this.onWolfSighting = onWolfSighting || (() => {});
+    this.onWolfSighting = onWolfSighting || (() => false);
     this.wolfSightingPlayed = false;
+    this._sightingRetry = 0;
 
     this.t = 0;
     this.pickupSprites = [];
@@ -564,14 +565,21 @@ export class Level {
     // First approach to the lake while looking for water: hand off to Game
     // for the binocular wolf sighting. Fires once, and only during the
     // water objective, so it can't interrupt anything else.
+    //
+    // Game can decline (the wolf isn't actually visible yet), in which case
+    // nothing is consumed and we ask again shortly — polled on a timer
+    // rather than every frame because the check costs a scene raycast.
     if (
       !this.wolfSightingPlayed &&
       this.questStage === QUEST.WATER &&
       playerPos &&
       Math.hypot(playerPos.x - POND.x, playerPos.z - POND.z) < WOLF_SIGHTING_RADIUS
     ) {
-      this.wolfSightingPlayed = true;
-      this.onWolfSighting();
+      this._sightingRetry -= dt;
+      if (this._sightingRetry <= 0) {
+        this._sightingRetry = 0.3;
+        if (this.onWolfSighting()) this.wolfSightingPlayed = true;
+      }
     }
 
     // pickup glow pulse
