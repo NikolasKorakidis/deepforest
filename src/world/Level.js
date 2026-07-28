@@ -10,6 +10,7 @@ import { wolfSpawnPoints } from '../entities/Wolf.js';
 import { createWaterSurface, updateWaterSurface, createShoreBlend } from './Water.js';
 import helicopterUrl from '../assets/models/helicopter_crashed.glb?url';
 import rifleUrl from '../assets/models/rifle.glb?url';
+import binocularsUrl from '../assets/models/binoculars.glb?url';
 import woodPileUrl from '../assets/models/wood_pile.glb?url';
 
 const BASE_LAKE_TREE_HEIGHT = 7; // slightly taller than the ambient forest for a set-piece feel
@@ -204,6 +205,20 @@ export class Level {
     return g;
   }
 
+  /** Same GLB as the held viewmodel, lying in the grass at pickup scale. */
+  _makeBinocularsProp() {
+    const g = new THREE.Group();
+    g.rotation.y = -0.6; // dropped at an angle, not squared up to the world
+    loadGLTF(binocularsUrl)
+      .then((gltf) => {
+        // normalizeModel grounds it, so it rests on the terrain rather than
+        // hovering at the default pickup offset.
+        g.add(normalizeModel(gltf.scene.clone(true), 0.3));
+      })
+      .catch((err) => console.error('Failed to load binoculars pickup model:', err));
+    return g;
+  }
+
   /** Everything salvageable from the crash, scattered around the wreck. */
   _placeStartingLoadout() {
     const inv = this.inventory;
@@ -230,18 +245,11 @@ export class Level {
       hud.toast('Compass acquired. Get your bearings.');
     }, { id: 'compass' });
 
-    const binoc = new THREE.Group();
-    const tubeMat = new THREE.MeshStandardMaterial({ color: 0x1e1f22, roughness: 0.6 });
-    for (const off of [-0.06, 0.06]) {
-      const tube = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.06, 0.18, 8), tubeMat);
-      tube.position.x = off;
-      binoc.add(tube);
-    }
-    this._addPickup(binoc, -5.2, 1.4, 'Take binoculars', () => {
+    this._addPickup(this._makeBinocularsProp(), -5.2, 1.4, 'Take binoculars', () => {
       inv.hasBinoculars = true;
       this.weapon.giveBinoculars();
-      hud.toast('Binoculars acquired — press 2, hold RMB to scan ahead.');
-    }, { id: 'binoculars' });
+      hud.toast('Binoculars acquired — press 2, RMB to scan ahead.');
+    }, { id: 'binoculars', yOffset: 0.02 });
 
     const rationBox = new THREE.Mesh(
       new THREE.BoxGeometry(0.35, 0.22, 0.25),

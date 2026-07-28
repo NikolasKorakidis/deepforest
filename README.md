@@ -16,8 +16,9 @@ runtime — there are no external image assets. The models are the exception:
 in `src/assets/models/`, loaded with three.js's `GLTFLoader`, are the
 crashed-helicopter, an animated first-person hands+rifle rig (the held
 viewmodel), a simpler rifle for the ground pickup, the animated wolf, the
-low-poly trees the forest instances, and a wood pile for gatherable
-firewood. Two 2D textures (`src/assets/textures/`) — a sniper crosshair and
+low-poly trees the forest instances, a wood pile for gatherable firewood,
+and a pair of binoculars used both as the ground pickup and the held
+viewmodel. Two 2D textures (`src/assets/textures/`) — a sniper crosshair and
 a binoculars mask — are composited into the HUD rather than the scene; see
 the aiming note below.
 
@@ -114,7 +115,7 @@ src/
     save.js               localStorage read/write for the autosave slot
     PerfScaler.js         adaptive render-resolution scaling to hold 60fps
   assets/
-    models/               .glb models (crashed helicopter, rifle, wolf, tree_assets, wood_pile)
+    models/               .glb models (helicopter, rifle, binoculars, wolf, tree_assets, wood_pile)
   world/
     heightfield.js        the terrain function — single source of truth for ground height
     Terrain.js            terrain mesh + vertex-color painting

@@ -3,8 +3,9 @@ import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
 import { CONFIG } from '../core/config.js';
 import { makeGlowSprite } from '../core/glow.js';
 import { makeSparkSprite } from '../core/particleTextures.js';
-import { loadGLTF } from '../core/assets.js';
+import { loadGLTF, normalizeModel } from '../core/assets.js';
 import fpsHandsUrl from '../assets/models/fps_hands.glb?url';
+import binocularsUrl from '../assets/models/binoculars.glb?url';
 
 // Rifle + binoculars: the rifle viewmodel is a rigged hands+weapon GLB
 // driven by its own authored animation clips (idle/walk/shoot/reload)
@@ -162,19 +163,35 @@ export class Weapon {
     this.flashLight.position.set(-0.03, 0.04, -0.32);
     rifle.add(this.flashLight);
 
-    // Binoculars.
+    // Binoculars viewmodel — only ever seen lowered (it's hidden while
+    // actually glassing, same as the rifle is hidden while scoped), so it's
+    // framed as something carried at the ready in the lower right.
     const binoc = new THREE.Group();
-    const tubeMat = new THREE.MeshStandardMaterial({ color: 0x1e1f22, roughness: 0.6 });
-    for (const off of [-0.035, 0.035]) {
-      const tube = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.035, 0.12, 10), tubeMat);
-      tube.rotation.x = Math.PI;
-      tube.position.set(off, 0, 0);
-      binoc.add(tube);
-    }
-    binoc.position.set(0.16, -0.18, -0.4);
+    binoc.position.set(0.15, -0.17, -0.38);
+    binoc.rotation.set(0.12, 0.3, -0.07); // canted, as if just dropped from the eyes
     binoc.visible = false;
     this.binocGroup = binoc;
     this.camera.add(binoc);
+
+    loadGLTF(binocularsUrl)
+      .then((gltf) => {
+        // The source is a porro-prism pair whose optical axis runs along
+        // local +X (objectives at +X, eyepieces at -X — established by
+        // measuring barrel radius at each end: 36mm vs 18mm). A +90° yaw
+        // maps +X onto the camera's -Z, i.e. pointing away from the player.
+        const model = normalizeModel(gltf.scene.clone(true), 0.19, {
+          ground: false, shadows: false,
+        });
+        model.rotation.y = Math.PI / 2;
+        model.traverse((o) => {
+          if (o.isMesh) {
+            o.renderOrder = 2;
+            o.frustumCulled = false; // viewmodel sits right at the near plane
+          }
+        });
+        binoc.add(model);
+      })
+      .catch((err) => console.error('Failed to load binoculars model:', err));
   }
 
   _playAnim(name, fade = 0.15) {
