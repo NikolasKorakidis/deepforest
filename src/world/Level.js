@@ -8,6 +8,7 @@ import { loadGLTF, normalizeModel } from '../core/assets.js';
 import { loadTreeAssets } from './TreeAssets.js';
 import { wolfSpawnPoints } from '../entities/Wolf.js';
 import { createWaterSurface, updateWaterSurface, createShoreBlend } from './Water.js';
+import { FireEffect } from './Fire.js';
 import helicopterUrl from '../assets/models/helicopter_crashed.glb?url';
 import rifleUrl from '../assets/models/rifle.glb?url';
 import binocularsUrl from '../assets/models/binoculars.glb?url';
@@ -146,11 +147,33 @@ export class Level {
     this.smokeX = hx + 0.4;
     this.smokeZ = hz;
 
-    // A dying flare's light, raking up the fuselage — no visible prop.
-    const fx = hx + 2.6, fz = hz + 1.4;
-    this.flareLight = new THREE.PointLight(0xff2010, 6, 45, 1.8);
-    this.flareLight.position.set(fx, this._groundY(fx, fz) + 1.2, fz);
-    this.scene.add(this.flareLight);
+    // The wreck is actually on fire, rather than just smoking under a red
+    // light as it used to be. Three separate seats of fire instead of one
+    // big column: a burning wreck reads as several things alight at once,
+    // and offsetting them across the fuselage gives the flames something
+    // to silhouette against from any approach. Only the main one carries a
+    // strong light — three bright point lights on one prop would flatten it
+    // and cost three shadowless lights for no visual gain.
+    this.wreckFires = [
+      { dx: 1.4, dz: -0.6, radius: 1.15, height: 3.0, flames: 7, embers: 9, intensity: 6.5, dist: 42 },
+      { dx: -2.2, dz: 1.1, radius: 0.65, height: 1.8, flames: 3, embers: 3, intensity: 0, dist: 0 },
+      { dx: 2.9, dz: 1.7, radius: 0.5, height: 1.3, flames: 3, embers: 3, intensity: 0, dist: 0 },
+    ].map((f, i) => {
+      const fx = hx + f.dx, fz = hz + f.dz;
+      const effect = new FireEffect({
+        radius: f.radius,
+        height: f.height,
+        flames: f.flames,
+        embers: f.embers,
+        lightColor: 0xff8433,
+        lightIntensity: f.intensity,
+        lightDistance: f.dist,
+        seed: i * 3.7 + 1,
+      });
+      effect.group.position.set(fx, this._groundY(fx, fz) + 0.15, fz);
+      this.scene.add(effect.group);
+      return effect;
+    });
 
     // Collision footprint (independent of the mesh — always present).
     this.grid.insert(hx, hz, 2.4);
@@ -609,10 +632,7 @@ export class Level {
     // checkpoint flag wave
     if (this.flag) this.flag.rotation.y = Math.sin(this.t * 2.2) * 0.35;
 
-    // crash-site flare light: gentle, steady flicker
-    if (this.flareLight) {
-      const flicker = Math.sin(this.t * 9) * 0.12 + Math.sin(this.t * 22 + 1.3) * 0.06;
-      this.flareLight.intensity = 6 + flicker;
-    }
+    // The wreck keeps burning — no fuel timer, unlike a campfire.
+    for (const f of this.wreckFires) f.update(dt);
   }
 }

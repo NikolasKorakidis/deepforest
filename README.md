@@ -122,6 +122,7 @@ src/
     Vegetation.js         instanced trees/grass/rocks; trees+rocks are colliders
     TreeAssets.js         extracts tree species from tree_assets.glb
     Water.js              reflective lake surface + shoreline blend (see design note below)
+    Fire.js               shared flame/ember/firelight effect (campfires + the wreck)
     Environment.js        day-night cycle: sun/moon, sky, fog, stars
     Level.js              hand-placed content: wreck, loot, lake, signs, checkpoint
   player/
@@ -190,6 +191,27 @@ of the muzzle and the rangefinder reads one metre instead of the hillside.
 
 Design notes:
 
+- Fire (`world/Fire.js`) is one effect shared by campfires and the wreck.
+  What makes it read as fire rather than as a glowing sprite is that each
+  flame tongue runs its own birth-to-death cycle on its own phase and speed
+  — something is always flaring up while something else thins out, so the
+  silhouette never repeats. The previous version scaled two fixed sprites
+  with a sine wave, which reads as breathing. Tongues nearer the middle of
+  the column are tinted whiter and outer ones redder, which is most of what
+  gives the flame depth; embers rise and fade on their own slower cycles,
+  and the light flickers on three mismatched frequencies so it doesn't
+  pulse. Campfires drive the whole thing with an `intensity` that follows
+  remaining fuel, so a fire running low visibly shortens and dims instead
+  of snapping out. Per-fire jitter is seeded from position rather than
+  `Math.random`, so a campfire restored from a save comes back with the
+  flame layout it had.
+- A burning wreck is three separate seats of fire rather than one big
+  column, because several things alight at once is what a crash reads as —
+  but only the main one carries a point light. Every point light costs
+  shading work on every lit fragment in the scene whether or not it
+  reaches, so the two smaller fires are lit by their neighbour and add
+  none of their own; the crash site's light count is what it was when it
+  was a single fake "flare" light with no flames at all.
 - Objective text is regenerated from live state every time
   (`Level.refreshObjective`) rather than written once at each transition.
   That's what lets a counter tick as you pick things up, and it means a
