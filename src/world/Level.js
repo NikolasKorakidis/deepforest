@@ -72,6 +72,7 @@ export class Level {
     this.t = 0;
     this.pickupSprites = [];
     this.smoke = [];
+    this.wreckFiresOut = false; // set once the crash fire has burned itself out
 
     // Quest chain: investigate the crash -> build a fire -> sleep -> find
     // water -> done. Each advance shows the completed line, then swaps in
