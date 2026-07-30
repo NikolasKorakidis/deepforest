@@ -74,10 +74,10 @@ export class CampfireSystem {
     // from the position so a campfire restored from a save flickers the
     // same way the original did.
     const effect = new FireEffect({
-      radius: 0.34,
-      height: 0.95,
-      flames: 5,
-      embers: 7,
+      radius: 0.42,
+      height: 1.15,
+      flames: 6,
+      embers: 8,
       lightColor: 0xff7722,
       lightIntensity: 2.6,
       lightDistance: 17,

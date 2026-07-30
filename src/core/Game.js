@@ -193,7 +193,7 @@ export class Game {
     if (this.state === 'loading') this.hud.setLoadingProgress(loadProgress());
     // Ambient animation keeps running on menus, so the start screen has a
     // living world behind it rather than a freeze-frame.
-    this.level.update(dt, this.env.sun, this.controller.position);
+    this.level.update(dt, this.env, this.controller.position);
     updateVegetation(dt, this.camera.position); // grass wind + chunk culling
     this.perf.update(dt);
     this.renderer.render(this.scene, this.camera);

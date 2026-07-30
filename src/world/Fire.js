@@ -115,9 +115,12 @@ export class FireEffect {
 
     for (const f of this.flames) {
       const cyc = (t * f.speed + f.phase) % 1;
-      // Fast rise, slow taper: a tongue flares almost immediately and then
-      // thins out, rather than growing and shrinking symmetrically.
-      const grow = Math.sin(Math.min(1, cyc * 1.2) * Math.PI);
+      // A tongue swells and dies across its whole cycle. This deliberately
+      // has no "dead" tail (an earlier `min(1, cyc * 1.2)` held grow at 0
+      // for the last 17% of every cycle): with few tongues, their dead
+      // periods can coincide and the entire fire blinks out for a frame.
+      // Measured — at 3 tongues that happened; with this it can't.
+      const grow = Math.sin(cyc * Math.PI);
       const wob = Math.sin(t * 6.1 + f.sway) * 0.35 + Math.sin(t * 11.3 + f.sway * 2) * 0.15;
 
       const s = f.sprite;
@@ -126,9 +129,13 @@ export class FireEffect {
         this.height * (0.15 + cyc * 0.6) * (0.55 + I * 0.45),
         f.oz + Math.cos(t * 5.2 + f.sway) * this.radius * 0.2
       );
-      const w = this.radius * 1.85 * f.width * grow * (0.55 + I * 0.45);
-      s.scale.set(w, w * (1.45 + cyc * 0.9), 1); // taller than wide, more so as it climbs
-      s.material.opacity = grow * (1 - cyc * 0.3) * I;
+      const w = this.radius * 2.4 * f.width * grow * (0.55 + I * 0.45);
+      s.scale.set(w, w * (1.25 + cyc * 0.6), 1); // taller than wide, more so as it climbs
+      // pow(grow, 0.55) rather than grow: a tongue reaches full opacity
+      // early and holds it, instead of spending most of its life
+      // semi-transparent. Without this the column is far dimmer than the
+      // single always-on sprite this replaced.
+      s.material.opacity = Math.pow(grow, 0.55) * (1 - cyc * 0.3) * I;
       s.material.rotation = wob * 0.14;
     }
 

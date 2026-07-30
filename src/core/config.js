@@ -103,6 +103,7 @@ export const CONFIG = {
     woodCost: 3,
     burnTimeSec: 300,       // one fire covers roughly one night
     dieDownSec: 45,         // over the last N seconds of fuel, flames visibly shrink
+    wreckBurnHours: 6,      // in-game hours before the helicopter fire burns out, leaving smoke
     warmRadius: 5.5,
   },
 };

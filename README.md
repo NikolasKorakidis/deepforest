@@ -211,7 +211,24 @@ Design notes:
   shading work on every lit fragment in the scene whether or not it
   reaches, so the two smaller fires are lit by their neighbour and add
   none of their own; the crash site's light count is what it was when it
-  was a single fake "flare" light with no flames at all.
+  was a single fake "flare" light with no flames at all. The wreck burns
+  for `CONFIG.fire.wreckBurnHours` (6) in-game hours, guttering out over
+  the last one and leaving the smoke column behind for the rest of the
+  run. That's driven off the world clock rather than accumulated real
+  seconds, because sleeping jumps the clock — measured in real time the
+  wreck would still be blazing after a night had passed. Elapsed is taken
+  against the fixed start of the run, so it needs no saved state of its
+  own and restores correctly for free.
+- Two sizing traps in the flame effect, both found by replaying the maths
+  rather than by eye. Tongue *count* and tongue *lifetime* interact: an
+  earlier version held each tongue at zero size for the last 17% of its
+  cycle, which is invisible with seven tongues but means a three-tongue
+  fire blinks out entirely whenever their dead periods coincide — so the
+  cycle now swells and dies with no dead tail. And because opacity is
+  driven by the same curve, a tongue spends most of its life
+  part-transparent; `pow(grow, 0.55)` pulls it up to full opacity early,
+  without which a whole cluster of tongues still reads dimmer than the
+  single always-on sprite this replaced.
 - Objective text is regenerated from live state every time
   (`Level.refreshObjective`) rather than written once at each transition.
   That's what lets a counter tick as you pick things up, and it means a

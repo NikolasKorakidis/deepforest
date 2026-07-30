@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import {
-  terrainHeight, hash2, POND, POND_RADIUS, POND_WATER_Y, CHECKPOINT,
+  terrainHeight, hash2, smoothstep, POND, POND_RADIUS, POND_WATER_Y, CHECKPOINT,
 } from './heightfield.js';
+import { CONFIG } from '../core/config.js';
 import { makeGlowSprite } from '../core/glow.js';
 import { makeSmokeSprite } from '../core/particleTextures.js';
 import { loadGLTF, normalizeModel } from '../core/assets.js';
@@ -155,9 +156,9 @@ export class Level {
     // strong light — three bright point lights on one prop would flatten it
     // and cost three shadowless lights for no visual gain.
     this.wreckFires = [
-      { dx: 1.4, dz: -0.6, radius: 1.15, height: 3.0, flames: 7, embers: 9, intensity: 6.5, dist: 42 },
-      { dx: -2.2, dz: 1.1, radius: 0.65, height: 1.8, flames: 3, embers: 3, intensity: 0, dist: 0 },
-      { dx: 2.9, dz: 1.7, radius: 0.5, height: 1.3, flames: 3, embers: 3, intensity: 0, dist: 0 },
+      { dx: 1.4, dz: -0.6, radius: 0.8, height: 2.4, flames: 7, embers: 9, intensity: 6.5, dist: 42 },
+      { dx: -2.2, dz: 1.1, radius: 0.45, height: 1.5, flames: 3, embers: 3, intensity: 0, dist: 0 },
+      { dx: 2.9, dz: 1.7, radius: 0.36, height: 1.2, flames: 3, embers: 3, intensity: 0, dist: 0 },
     ].map((f, i) => {
       const fx = hx + f.dx, fz = hz + f.dz;
       const effect = new FireEffect({
@@ -585,13 +586,41 @@ export class Level {
     this.grid.insert(x, z, 0.4);
   }
 
+  /**
+   * The wreck burns itself out over the first `wreckBurnHours` in-game
+   * hours and is left smoking for the rest of the run.
+   *
+   * Driven off the world clock (`env.day` + `env.time`) rather than
+   * accumulated real seconds, because sleeping jumps the clock forward —
+   * measuring real time would leave the wreck merrily ablaze after a night
+   * had passed. Elapsed is measured against the fixed start of the run
+   * (day 1 at `startTimeOfDay`), so it needs no state of its own and
+   * therefore restores correctly from a save for free.
+   */
+  _updateWreckFires(dt, env) {
+    if (this.wreckFiresOut) return;
+
+    const elapsedHours = ((env.day - 1) + env.time - CONFIG.startTimeOfDay) * 24;
+    const total = CONFIG.fire.wreckBurnHours;
+    // Guttering: dies over the final hour rather than blinking out.
+    const intensity = 1 - smoothstep(total - 1, total, elapsedHours);
+
+    if (intensity <= 0) {
+      for (const f of this.wreckFires) f.extinguish();
+      this.wreckFiresOut = true;
+      return;
+    }
+    for (const f of this.wreckFires) f.update(dt, intensity);
+  }
+
   // ---------------------------------------------------------------- update
   /** @param sun Environment's directional light (sun by day, moon by night)
    *   — keeps the lake's specular highlight tracking wherever it actually is. */
-  update(dt, sun, playerPos) {
+  update(dt, env, playerPos) {
     this.t += dt;
 
-    if (this.water && sun) updateWaterSurface(this.water, dt, sun);
+    if (this.water && env?.sun) updateWaterSurface(this.water, dt, env.sun);
+    if (env) this._updateWreckFires(dt, env);
 
     // First approach to the lake while looking for water: hand off to Game
     // for the binocular wolf sighting. Fires once, and only during the
@@ -632,7 +661,5 @@ export class Level {
     // checkpoint flag wave
     if (this.flag) this.flag.rotation.y = Math.sin(this.t * 2.2) * 0.35;
 
-    // The wreck keeps burning — no fuel timer, unlike a campfire.
-    for (const f of this.wreckFires) f.update(dt);
   }
 }
