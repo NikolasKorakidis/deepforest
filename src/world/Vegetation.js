@@ -93,12 +93,15 @@ function inLake(x, z, margin = 1) {
   return Math.hypot(x - POND.x, z - POND.z) < POND_RADIUS + margin;
 }
 
-/** Every Nth tree gets a pile of fallen branches at its foot. */
-const FIREWOOD_EVERY_N_TREES = 5;
+/** Every Nth tree gets a pile of fallen branches at its foot. Kept sparse
+ *  because the trees themselves are now harvestable (see Level's tree
+ *  interactions) — a pile is the lucky find, not the main supply. */
+const FIREWOOD_EVERY_N_TREES = 10;
 
-/** @returns { firewoodSpots } — where Level should put gatherable firewood.
- *  Derived from the tree scatter rather than placed separately, so every
- *  pile genuinely sits under a tree. */
+/** @returns { firewoodSpots, treeSpots } — where Level should put gatherable
+ *  firewood, and every tree, so it can hang a "gather wood" interaction on
+ *  each one. Both derived from the tree scatter rather than placed
+ *  separately, so they line up with what's actually drawn. */
 export function scatterVegetation(scene, grid) {
   treeChunks.length = 0;
   grassChunks.length = 0;
@@ -117,7 +120,7 @@ export function scatterVegetation(scene, grid) {
     const z = t.z + Math.sin(a) * r;
     firewoodSpots.push({ x, z, y: terrainHeight(x, z), rot: hash2(i, 2, 73) * Math.PI * 2 });
   }
-  return { firewoodSpots };
+  return { firewoodSpots, treeSpots };
 }
 
 // ------------------------------------------------------------------- trees

@@ -57,9 +57,9 @@ not part of the running game — see the tree/lake design note below.
 1. **Crash site** — you start in a clearing at the origin beside the burning
    wreck. Scavenge it: rifle + magazines, compass, binoculars, rations.
 2. **Explore** — open meadow gives way to dense forest in every direction.
-   Gather fallen branches (firewood) as you go — there's a pile at the foot
-   of roughly every fifth tree, so the woods themselves are the wood supply
-   rather than a handful of set-piece drops.
+   Wood comes from the woods themselves rather than from set-piece drops:
+   press **E** at any tree to break off an armful (+1, once per tree), and
+   roughly every tenth tree also has a fallen pile at its foot worth +2.
 3. **Stats tick down** — hunger, thirst and energy drain over time; warmth
    drops hard at night and at altitude. Empty bars bleed health. Eat rations
    (F) and build a campfire (T) before dark. Press E beside a lit fire to
@@ -413,7 +413,7 @@ Design notes:
   was too conspicuous to leave. Everything else they walk through.
 - Terrain collision is "walk anywhere" — steep slopes slow you down only
   visually; nothing stops you climbing the ridge ring except how tall it is.
-- Firewood (~250 piles, one under every fifth tree) shares a single
+- Firewood (~125 piles, one under every tenth tree) shares a single
   `InstancedMesh` per sub-mesh of the wood-pile GLB — three draw calls for
   the lot. Building them the way the handful of crash-site pickups are
   built (a `Group` plus a glow sprite each) would have been close to a
@@ -421,6 +421,21 @@ Design notes:
   instance matrix instead of removing an object, and they deliberately skip
   the loot pickups' glow sprite since the `[E]` prompt is discovery enough
   for something this common.
+- Gathering wood from a tree is one `InteractionSystem` entry per tree
+  (~1250 of them) rather than a per-frame search for the nearest trunk.
+  That reuses the prompt and closest-wins behaviour already in the system
+  instead of duplicating it, and costs a few hundred extra distance checks
+  a frame — measured at ~0.2% of the frame budget, next to nothing beside
+  the raycasts already running. The list also shrinks as trees are used up.
+  It forced one change though: an interaction offered at *every tree in the
+  forest* will regularly sit closer to you than the campfire you're
+  standing at, which would silently lock you out of the cook/sleep menu. So
+  entries now carry an optional `priority` that breaks ties before distance
+  does, and tree gathering sits below everything else.
+- Stripped trees are deliberately not persisted in `takenPickups` — a flag
+  per tree would bloat the save for a resource the player can't meaningfully
+  exhaust, so trees come back on reload. Fallen piles, being finite and
+  hand-countable, are persisted.
 - Vegetation LOD is distance-based only — there are no lower-poly tree
   models, so a distant tree costs the same ~2000 triangles as a near one.
   Real impostors/billboards for far chunks would be the next step.

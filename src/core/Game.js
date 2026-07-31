@@ -68,7 +68,7 @@ export class Game {
     this.scene.add(createTerrain());
     // Firewood is placed under a fraction of the scattered trees, so Level
     // takes its spots from the vegetation pass rather than picking its own.
-    const { firewoodSpots } = scatterVegetation(this.scene, this.grid);
+    const { firewoodSpots, treeSpots } = scatterVegetation(this.scene, this.grid);
     this.env = new Environment(this.scene);
 
     this.stats = new PlayerStats();
@@ -96,6 +96,7 @@ export class Game {
       takenPickups: new Set(this.pendingSave?.takenPickups ?? []),
       onQuestAdvance: () => this.save(),
       firewoodSpots,
+      treeSpots,
       onWolfSighting: () => this.playWolfSighting(),
     });
 

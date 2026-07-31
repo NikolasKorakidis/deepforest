@@ -53,7 +53,7 @@ export class Level {
    *   — those items were already collected in a previous session).
    *  @param onQuestAdvance(stage) called right after questStage changes —
    *   Game.js uses this to autosave at each quest beat. */
-  constructor({ scene, grid, interactions, inventory, weapon, stats, hud, sfx, takenPickups, onQuestAdvance, firewoodSpots, onWolfSighting }) {
+  constructor({ scene, grid, interactions, inventory, weapon, stats, hud, sfx, takenPickups, onQuestAdvance, firewoodSpots, treeSpots, onWolfSighting }) {
     this.scene = scene;
     this.grid = grid;
     this.interactions = interactions;
@@ -65,6 +65,7 @@ export class Level {
     this.takenPickups = takenPickups || new Set();
     this.onQuestAdvance = onQuestAdvance || (() => {});
     this.firewoodSpots = firewoodSpots || [];
+    this.treeSpots = treeSpots || [];
     this.onWolfSighting = onWolfSighting || (() => false);
     this.wolfSightingPlayed = false;
     this._sightingRetry = 0;
@@ -82,6 +83,7 @@ export class Level {
     this._buildHelicopter();
     this._placeStartingLoadout();
     this._placeWood();
+    this._placeTreeHarvesting();
     this._buildPond();
     this._buildCheckpoint();
 
@@ -312,7 +314,7 @@ export class Level {
       case QUEST.FIRE:
         return this.hud.setObjective(
           `Build a fire   ${wood}/${FIRE_WOOD_COST} wood`,
-          false, 'Look in the forest for wood, then press T.'
+          false, 'Press E at any tree to gather wood. Then T to build.'
         );
       case QUEST.SLEEP:
         return this.hud.setObjective(
@@ -343,6 +345,10 @@ export class Level {
     }
     this._advanceTo(QUEST.FIRE, 'Crash site stripped');
     this.hud.toast("Nothing else here worth carrying. You won't last the night without a fire.", 6500);
+    setTimeout(
+      () => this.hud.toast('Head into the trees — press E at a trunk to break off branches.', 6000),
+      6800
+    );
   }
 
   /** Called by the firewood pickups so the wood counter tracks live. */
@@ -395,6 +401,40 @@ export class Level {
    * discovery enough for something this common, and 250 more sprites would
    * put the draw calls straight back.
    */
+  /**
+   * Every tree can be stripped for branches once, with E. This is the main
+   * wood supply now — fallen piles are the lucky find on top of it.
+   *
+   * One interaction per tree rather than something that searches for the
+   * nearest trunk each frame: `InteractionSystem` already picks the closest
+   * candidate in range, so trees just join that list and get the "[E]"
+   * prompt and the closest-wins behaviour for free. It scans a few hundred
+   * extra entries per frame, which is a rounding error next to the raycasts
+   * already happening, and the list shrinks as trees are used up.
+   *
+   * Deliberately *not* recorded in `takenPickups`: persisting a flag per
+   * tree would bloat the save for something the player can't really run
+   * out of, so stripped trees come back on reload.
+   */
+  _placeTreeHarvesting() {
+    for (const t of this.treeSpots) {
+      this.interactions.add({
+        position: new THREE.Vector3(t.x, t.y + 1, t.z),
+        radius: 2.0,
+        label: 'Gather wood (+1)',
+        // Ambient and everywhere — must never outrank a campfire, a pickup
+        // or the lake just by being a bit closer. See InteractionSystem.
+        priority: -1,
+        onUse: (entry) => {
+          this.inventory.wood += 1;
+          this.sfx.build(); // woody thud rather than the item-pickup blip
+          entry.disabled = true; // one armful per tree, so you keep moving
+          this._notifyWoodTaken();
+        },
+      });
+    }
+  }
+
   _placeWood() {
     const live = (this.firewoodSpots || [])
       .map((s, i) => ({ ...s, id: `wood${i}` }))
