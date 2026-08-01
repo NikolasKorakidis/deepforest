@@ -78,9 +78,12 @@ not part of the running game — see the tree/lake design note below.
       Drinking completes the chain.
 
    Autosaves at each beat (see Saving).
-5. **Wolves** — four dens ring the lake, spread across the half of the shore
-   away from the approach you walk in on, so the water is contested ground
-   rather than an ambush the moment you arrive. They aggro at 20m (day or
+5. **Wolves** — six in all. Four dens ring the lake, spread across the half
+   of the shore away from the approach you walk in on, so the water is
+   contested ground rather than an ambush the moment you arrive. Two more
+   sit up on the ridge that overlooks the lake from the north-east — far
+   enough out (~80m) to be a separate encounter for anyone who climbs
+   rather than extra pressure at the waterline. They aggro at 20m (day or
    night), close in at a run, then drop to a stalking creep before lunging,
    and they path *around* the lake rather than trotting across it. A
    headshot drops one instantly; a body shot leaves it wounded and visibly
