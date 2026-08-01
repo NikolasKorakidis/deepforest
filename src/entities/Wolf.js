@@ -371,8 +371,22 @@ export function wolfSpawnPoints(pond) {
   // half of the shore *away* from the approach the player walks in on (the
   // gap in the treeline facing spawn, ~129°) — so the water is contested
   // ground rather than an ambush the moment you arrive.
-  return [25, -35, -95, -155].map((deg) => {
+  const shore = [25, -35, -95, -155].map((deg) => {
     const a = (deg * Math.PI) / 180;
     return { x: pond.x + Math.cos(a) * 21, z: pond.z + Math.sin(a) * 21 };
   });
+
+  // Two more up on the ridge that overlooks the lake from the north-east.
+  // Offsets are relative to the lake so the pair travels with it, but the
+  // values come from scanning the heightfield for the flattest footing on
+  // the first real high ground beyond the water — the basin between here
+  // and the shore only rises a few units, so this genuinely is where the
+  // mountain starts. Far enough out (~80m) that they're a separate
+  // encounter for anyone who climbs, not extra pressure at the waterline.
+  const mountain = [
+    { x: pond.x + 78, z: pond.z - 25 },
+    { x: pond.x + 60, z: pond.z - 58 },
+  ];
+
+  return [...shore, ...mountain];
 }
