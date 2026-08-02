@@ -67,10 +67,42 @@ export const RANGE = {
   laneX: -40,
   firingZ: 30,
   maxDist: 500,
-  halfWidth: 20,   // flat ground either side of the centre line
+  halfWidth: 32,   // cleared ground either side of the centre line
   shoulder: 26,    // blend distance back out to natural terrain
   laneY: 1.4,
 };
+
+/**
+ * Target layout, shared so terrain, vegetation and Range.js can't disagree
+ * about where the plates are.
+ *
+ * Each target gets its own *angular* lane rather than sharing a centreline:
+ * a plate at 150m would otherwise sit exactly on the line of sight to the
+ * plate at 500m. The farthest takes the centre lane and the nearest the
+ * outermost, because a 25m plate subtends the most angle but converting
+ * that to metres at 25m costs almost nothing.
+ */
+export const RANGE_DISTANCES = [25, 50, 75, 100, 150, 200, 250, 300, 400, 500];
+const LANE_STEP_DEG = 3.0;
+
+/** Distances whose plate stands on a rise rather than the lane floor. */
+const HILL_TARGETS = new Set([150, 300, 500]);
+
+export function rangeTargetSpots() {
+  const byDistance = [...RANGE_DISTANCES].sort((a, b) => b - a);
+  return byDistance.map((dist, j) => {
+    const lane = Math.ceil(j / 2) * (j % 2 === 1 ? -1 : 1);
+    const x = RANGE.laneX + dist * Math.tan((lane * LANE_STEP_DEG * Math.PI) / 180);
+    return { dist, x, z: RANGE.firingZ - dist, onHill: HILL_TARGETS.has(dist) };
+  });
+}
+
+// Mounds under the hill targets, as pure geometry so terrainHeight stays a
+// function of position alone. Raising a far plate onto a rise also makes it
+// *easier* to see — it breaks the silhouette off the ground behind it.
+const MOUNDS = rangeTargetSpots()
+  .filter((t) => t.onHill)
+  .map((t) => ({ x: t.x, z: t.z, radius: 26, height: 5.5 }));
 
 const RANGE_END_Z = RANGE.firingZ - RANGE.maxDist - 45;
 
@@ -139,9 +171,29 @@ export function terrainHeight(x, z) {
   // left standing either side, which frames the lane like a cutting and
   // gives long shots a backstop.
   const lane = rangeCorridor(x, z);
-  if (lane > 0) h = lerp(h, RANGE.laneY, lane);
+  if (lane > 0) h = lerp(h, rangeFloor(x, z), lane);
 
   return h;
+}
+
+/**
+ * The lane's own ground: a gently rolling floor rather than a runway, plus
+ * the mounds the hill targets stand on. Kept low-frequency and shallow so
+ * it reads as ground without ever rising into a sightline — see the LOS
+ * check in the range verification.
+ */
+function rangeFloor(x, z) {
+  let y = RANGE.laneY
+    + 1.15 * Math.sin(z * 0.017 + 0.6)
+    + 0.7 * Math.sin(x * 0.035 + z * 0.008);
+
+  for (const m of MOUNDS) {
+    const d = Math.hypot(x - m.x, z - m.z);
+    // cos falloff: flat-topped enough to stand a target on, and it meets
+    // the surrounding floor with zero gradient rather than a crease.
+    if (d < m.radius) y += m.height * 0.5 * (1 + Math.cos((d / m.radius) * Math.PI));
+  }
+  return y;
 }
 
 /** Water surface height. Defined as the bed height exactly at POND_RADIUS,

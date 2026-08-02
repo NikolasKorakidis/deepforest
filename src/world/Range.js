@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { terrainHeight, RANGE } from './heightfield.js';
+import { terrainHeight, RANGE, rangeTargetSpots } from './heightfield.js';
 
 // The shooting range, built into the wilderness scene rather than a level
 // of its own: a cleared lane north-west of the crash site (carved by
@@ -10,15 +10,6 @@ import { terrainHeight, RANGE } from './heightfield.js';
 // distance-weighted, because a 500m plate is a different problem from a
 // 50m one and should pay like it.
 
-const TARGET_RANGES = [25, 50, 75, 100, 150, 200, 250, 300, 400, 500];
-
-// Targets can't share a centreline — a plate at 150m sits exactly on the
-// line of sight to the plate at 500m. Each gets its own angular lane, which
-// separates them at any distance. The farthest takes the centre lane and
-// the nearest the outermost: a 25m plate subtends ~1.3° and needs the most
-// angular room, but converting that to metres at 25m costs almost nothing,
-// whereas giving the 500m plate an outer lane would fling it 60m sideways.
-const LANE_STEP_DEG = 2.2;
 
 /**
  * Plates grow with distance, as real range targets do. The generous base
@@ -87,29 +78,46 @@ class Target {
     this.pivot.rotation.x = -Math.PI / 2; // starts down
     this.group.add(this.pivot);
 
+    // Dark backing board, a little larger than the plate. This is what
+    // actually makes a target readable at 500m: the plate alone is a pale
+    // shape against pale hillside, whereas a light face ringed by a dark
+    // border silhouettes against *any* background.
+    const board = new THREE.Mesh(
+      new THREE.BoxGeometry(size * 1.16, size * 1.16, size * 0.05),
+      new THREE.MeshStandardMaterial({ color: 0x15181c, roughness: 0.95 })
+    );
+    board.position.set(0, size / 2, -size * 0.02);
+    this.pivot.add(board);
+
+    // Emissive lifts the face out of shadow so a plate under the ridge or
+    // backlit at dawn stays as legible as one in full sun — without it,
+    // visibility swung wildly with the time of day.
     const plateMat = new THREE.MeshStandardMaterial({
-      color: 0xd8d2c4, roughness: 0.55, metalness: 0.35,
+      color: 0xf4f1e8, roughness: 0.5, metalness: 0.25,
+      emissive: 0x2a2823, emissiveIntensity: 0.45,
     });
     this.plate = new THREE.Mesh(new THREE.BoxGeometry(size, size, size * 0.06), plateMat);
     this.plate.position.y = size / 2;
     this.pivot.add(this.plate);
 
     const ring = new THREE.Mesh(
-      new THREE.CircleGeometry(size * 0.3, 20),
-      new THREE.MeshStandardMaterial({ color: 0xc2402c, roughness: 0.7 })
+      new THREE.CircleGeometry(size * 0.32, 20),
+      new THREE.MeshStandardMaterial({
+        color: 0xe2481f, roughness: 0.6, emissive: 0x3a1206, emissiveIntensity: 0.5,
+      })
     );
     ring.position.set(0, size / 2, size * 0.031 + 0.001);
     this.pivot.add(ring);
     const dot = new THREE.Mesh(
-      new THREE.CircleGeometry(size * 0.12, 16),
-      new THREE.MeshStandardMaterial({ color: 0x14181e, roughness: 0.8 })
+      new THREE.CircleGeometry(size * 0.13, 16),
+      new THREE.MeshStandardMaterial({ color: 0x0d1014, roughness: 0.85 })
     );
     dot.position.set(0, size / 2, size * 0.031 + 0.002);
     this.pivot.add(dot);
 
     // Only the plate is shootable — the posts aren't, so a hit is a hit on
     // the target proper rather than on its furniture.
-    for (const m of [this.plate, ring, dot]) m.userData.onShot = () => this.hit();
+    for (const m of [this.plate, ring, dot, board]) m.userData.onShot = () => this.hit();
 
     const labelH = Math.max(1.1, dist * 0.012);
     const label = new THREE.Mesh(
@@ -194,22 +202,26 @@ export class Range {
     this.streak = 0;
     this.streakTimer = 0;
 
-    const groundY = RANGE.laneY;
-
     // Firing line, so it's obvious where the measured distances start.
+    // Sits on real terrain, not on RANGE.laneY — the lane floor rolls now,
+    // so the nominal height would have it buried at one end.
     const line = new THREE.Mesh(
       new THREE.PlaneGeometry(RANGE.halfWidth * 2, 0.5),
       new THREE.MeshStandardMaterial({ color: 0xd8d2c4, roughness: 1 })
     );
     line.rotation.x = -Math.PI / 2;
-    line.position.set(RANGE.laneX, groundY + 0.02, RANGE.firingZ);
+    line.position.set(
+      RANGE.laneX,
+      terrainHeight(RANGE.laneX, RANGE.firingZ) + 0.06,
+      RANGE.firingZ
+    );
     scene.add(line);
 
-    const byDistance = [...TARGET_RANGES].sort((a, b) => b - a);
-    this.targets = byDistance.map((d, j) => {
-      const lane = Math.ceil(j / 2) * (j % 2 === 1 ? -1 : 1);
-      const laneX = RANGE.laneX + d * Math.tan((lane * LANE_STEP_DEG * Math.PI) / 180);
-      const t = new Target(d, laneX, groundY);
+    // Each target sits on the real ground at its spot — several stand on
+    // mounds (see heightfield's HILL_TARGETS), which both varies the lane
+    // and lifts those plates clear of the ground behind them.
+    this.targets = rangeTargetSpots().map((spot) => {
+      const t = new Target(spot.dist, spot.x, terrainHeight(spot.x, spot.z));
       t.onHit = (target) => this._registerHit(target);
       scene.add(t.group);
       return t;
@@ -218,8 +230,11 @@ export class Range {
     // Socks down the lane, so wind is readable at the distance you're
     // shooting rather than only at your feet — the far one is what matters
     // for a 500m shot.
-    this.socks = [40, 160, 320].map((d) => {
-      const x = RANGE.laneX + RANGE.halfWidth - 3;
+    // Alternating sides so there's one in view wherever you're pointed, and
+    // set in from the corridor edge so they read against the lane rather
+    // than against the treeline.
+    this.socks = [[35, 15], [170, -17], [330, 14]].map(([d, off]) => {
+      const x = RANGE.laneX + off;
       const z = RANGE.firingZ - d;
       const s = new Windsock(x, z, terrainHeight(x, z));
       scene.add(s.group);

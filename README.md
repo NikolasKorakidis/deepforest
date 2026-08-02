@@ -57,9 +57,12 @@ not part of the running game — see the tree/lake design note below.
 ## Gameplay loop
 
 1. **The range** — 40m west of the wreck, a cleared lane with ten pop-up
-   plates at 25, 50, 75, 100, 150, 200, 250, 300, 400 and 500m. Plates rise,
-   wait, and drop again, so there's a reason to stay on the glass and a
-   reason to hurry.
+   plates at 25, 50, 75, 100, 150, 200, 250, 300, 400 and 500m, fanned ~47m
+   across the lane so no two share a sightline. Three of them (150m, 300m,
+   500m) stand on rises, which varies the shot and lifts those plates clear
+   of the ground behind them. Plates rise, wait, and drop again, so there's
+   a reason to stay on the glass and a reason to hurry. It's daylight when
+   you start.
 2. **Range it, then hold** — RMB scopes in; the rangefinder reads the
    distance to whatever is centred. Hold the matching BDC mark (mark 3 at
    300m, half-step ticks for 150m and 250m) and the shot lands on the plate.
@@ -226,7 +229,17 @@ Design notes:
   through it, cutting clean through the ridge ring that would otherwise rear
   up 60m across the far half. The ridge is left standing either side, which
   frames the lane and gives long shots a backstop. Vegetation reads the same
-  corridor function, so nothing grows in the firing line.
+  corridor function, so nothing grows in the firing line — plus an explicit
+  22m clearing around every target, because outer-lane plates sit out on the
+  shoulder where the flattening has faded and trees are allowed again. The
+  lane floor rolls gently and carries a few mounds rather than being a
+  runway; the mound profile is a cosine falloff so it meets the surrounding
+  floor with zero gradient instead of a crease.
+- Target visibility is a light face inside a dark backing board, not just a
+  pale plate — a pale plate against a pale hillside disappears, whereas the
+  border silhouettes against any background. Both face and bullseye carry a
+  little emissive so a plate in the ridge's shadow reads the same as one in
+  full sun; without it legibility swung with the time of day.
 - Fog had to be thinned hard (0.0065 to 0.0014 by day). `FogExp2` falls off
   with the *square* of distance, so the old value left a 500m plate at about
   3% visibility — the far end of the range was quite literally not there.

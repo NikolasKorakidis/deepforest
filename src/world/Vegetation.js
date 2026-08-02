@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import {
   terrainHeight, hash2, forestDensity, POND, POND_RADIUS, WORLD,
-  SPAWN_CLEARING_RADIUS, rangeCorridor,
+  SPAWN_CLEARING_RADIUS, rangeCorridor, rangeTargetSpots,
 } from './heightfield.js';
 import { loadTreeAssets } from './TreeAssets.js';
 
@@ -88,6 +88,19 @@ function slopeAt(x, z) {
   return Math.hypot(h1, h2) / 2;
 }
 
+// Nothing grows near a target. The corridor alone isn't enough: outer-lane
+// plates sit out on the shoulder where the flattening has faded and trees
+// are allowed again, so a 250m plate could end up behind a trunk. Cleared
+// generously, since a tree *beside* a target still hides it from an angle.
+const TARGET_CLEARING = 22;
+const TARGET_SPOTS = rangeTargetSpots();
+function nearTarget(x, z) {
+  for (const t of TARGET_SPOTS) {
+    if (Math.hypot(x - t.x, z - t.z) < TARGET_CLEARING) return true;
+  }
+  return false;
+}
+
 /** Inside the lake (plus a shore margin) — nothing is planted here. */
 function inLake(x, z, margin = 1) {
   return Math.hypot(x - POND.x, z - POND.z) < POND_RADIUS + margin;
@@ -148,7 +161,7 @@ function scatterTrees(scene, grid, chunkMap) {
       if (Math.hypot(x, z) < SPAWN_CLEARING_RADIUS) continue; // keep spawn open
       if (inLake(x, z, 4)) continue;
       // A shooting lane with trees down it isn't a shooting lane.
-      if (rangeCorridor(x, z) > 0.05) continue;
+      if (rangeCorridor(x, z) > 0.05 || nearTarget(x, z)) continue;
 
       const y = terrainHeight(x, z);
       if (y > 30) continue;                 // treeline on the ridge
