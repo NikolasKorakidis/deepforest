@@ -122,6 +122,15 @@ export class SFX {
     this._blip(750, 0.05, 0.2, 'square', 1.6);
   }
 
+  /** Steel plate ring — two close, high, fast-decaying partials, which is
+   *  what separates "metal" from the softer synth blips used elsewhere. */
+  ding() {
+    if (!this.ctx) return;
+    this._blip(1860, 0.05, 0.22, 'sine');
+    this._blip(2790, 0.04, 0.12, 'sine', 0.012);
+    this._blip(1240, 0.09, 0.1, 'triangle', 0.02);
+  }
+
   drink() {
     if (!this.ctx) return;
     const t = this.ctx.currentTime;

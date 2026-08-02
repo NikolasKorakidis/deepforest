@@ -295,9 +295,15 @@ export class Weapon {
       }
 
       if (hit) {
+        // Walk up to whichever ancestor claims the hit. `wolfRef` is the
+        // wilderness's living target; `onShot` is the generic hook anything
+        // else can expose (the range's steel plates use it).
         let obj = hit.object;
-        while (obj && !obj.userData.wolfRef) obj = obj.parent;
-        if (obj && obj.userData.wolfRef) {
+        while (obj && !obj.userData.wolfRef && !obj.userData.onShot) obj = obj.parent;
+        if (obj && obj.userData.onShot) {
+          obj.userData.onShot(hit.point);
+          this.hud.hitmarker();
+        } else if (obj && obj.userData.wolfRef) {
           const wolf = obj.userData.wolfRef;
           // Headshots always drop a wolf outright, regardless of remaining
           // health — everywhere else takes CONFIG.wolf.health hits (2), the

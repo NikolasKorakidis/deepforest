@@ -18,6 +18,11 @@ import { HUD } from '../ui/HUD.js';
 import { clamp, terrainHeight, POND, POND_RADIUS } from '../world/heightfield.js';
 import { saveGame, loadGame, clearSave } from './save.js';
 import { PerfScaler } from './PerfScaler.js';
+import { ShootingRange } from '../world/ShootingRange.js';
+
+/** The range has no obstacles, so the controller gets a grid with nothing
+ *  in it rather than a special case for "no collision". */
+const EMPTY_GRID = new SpatialGrid(8);
 import { allAssetsSettled, loadProgress } from './assets.js';
 
 // Orchestrator: owns the renderer/scene/camera and every game system,
@@ -83,7 +88,7 @@ export class Game {
       controller: this.controller,
       hud: this.hud,
       sfx: this.sfx,
-      getWorld: () => this.scene,
+      getWorld: () => this.activeScene,
     });
     this.campfires = new CampfireSystem(
       this.scene, this.sfx, this.interactions,
@@ -117,6 +122,13 @@ export class Game {
     // (see openCampfireMenu) rather than a standalone key.
 
     this.stats.onDamaged = () => this.hud.damageFlash();
+
+    // The practice range is a second level with its own scene, built up
+    // front so switching to it is instant. `activeScene` is what actually
+    // gets rendered and what bullets/the rangefinder raycast against.
+    this.range = new ShootingRange({ hud: this.hud, sfx: this.sfx });
+    this.mode = 'wilderness';
+    this.activeScene = this.scene;
 
     // --- meta state ---
     this.state = 'loading';
@@ -172,11 +184,22 @@ export class Game {
     this.input.onLockChange((locked) => {
       if (!locked && this.state === 'playing') {
         this.state = 'paused';
-        this.hud.showPause(true, () => this.input.lock());
+        this.hud.showPause(true, () => this.input.lock(), {
+          inRange: this.mode === 'range',
+          onToggleRange: () => this.toggleRange(),
+        });
       } else if (locked && this.state === 'paused') {
         this.state = 'playing';
         this.hud.showPause(false);
       }
+    });
+
+    // Safety net for a lost pointer lock. Browsers refuse to re-lock for a
+    // moment after Escape, so a level switch made straight from the pause
+    // menu can land in 'playing' with the mouse still free and no visible
+    // way back in. A click on the canvas always re-arms it.
+    this.renderer.domElement.addEventListener('click', () => {
+      if (this.state === 'playing' && !this.input.pointerLocked) this.input.lock();
     });
 
     // Prime lighting/sky so the start-screen backdrop isn't black.
@@ -192,16 +215,22 @@ export class Game {
     if (this.state === 'playing') this.update(dt);
     if (this.state === 'cutscene') this.updateCutscene(dt);
     if (this.state === 'loading') this.hud.setLoadingProgress(loadProgress());
-    // Ambient animation keeps running on menus, so the start screen has a
-    // living world behind it rather than a freeze-frame.
-    this.level.update(dt, this.env, this.controller.position);
-    updateVegetation(dt, this.camera.position); // grass wind + chunk culling
+
+    if (this.mode === 'range') {
+      this.range.update(dt);
+    } else {
+      // Ambient animation keeps running on menus, so the start screen has a
+      // living world behind it rather than a freeze-frame.
+      this.level.update(dt, this.env, this.controller.position);
+      updateVegetation(dt, this.camera.position); // grass wind + chunk culling
+    }
     this.perf.update(dt);
-    this.renderer.render(this.scene, this.camera);
+    this.renderer.render(this.activeScene, this.camera);
   }
 
   update(dt) {
     this.elapsed += dt;
+    if (this.mode === 'range') return this.updateRange(dt);
 
     this.env.update(dt, this.controller.position);
     this.controller.update(dt);
@@ -249,6 +278,91 @@ export class Game {
     // --- terminal states ---
     if (!this.stats.alive) this.gameOver();
     else if (this.controller.position.distanceTo(this.level.checkpoint) < 5) this.finish();
+  }
+
+  // ----------------------------------------------------------- range level
+  /**
+   * Swaps between the wilderness and the practice range. Both scenes stay
+   * built; what moves is the camera (the viewmodels are its children), what
+   * the controller treats as ground, and which scene renders.
+   *
+   * The survival sim is deliberately left behind: no stats drain, no
+   * wolves, no quest, no autosave. The range is a place to learn the rifle,
+   * and a run shouldn't be able to end — or advance — while you're in it.
+   */
+  toggleRange() {
+    if (this.mode === 'wilderness') {
+      this.savedWorld = {
+        pos: this.controller.position.clone(),
+        yaw: this.controller.yaw,
+        pitch: this.controller.pitch,
+        groundAt: this.controller.groundAt,
+        bounds: this.controller.bounds,
+        grid: this.controller.grid,
+        hasRifle: this.weapon.hasRifle,
+        equipped: this.weapon.equipped,
+        far: this.camera.far,
+      };
+
+      this.mode = 'range';
+      this.activeScene = this.range.scene;
+      this.range.scene.add(this.camera); // three removes it from the old parent
+
+      this.controller.groundAt = () => this.range.groundAt();
+      this.controller.bounds = this.range.bounds;
+      this.controller.grid = EMPTY_GRID;
+      this.controller.position.copy(this.range.spawn);
+      this.controller.yaw = 0;   // facing straight down the lane (-Z)
+      this.controller.pitch = 0;
+      this.controller.smoothY = 0;
+
+      // 500m targets sit well beyond the wilderness far plane.
+      this.camera.far = 900;
+      this.camera.updateProjectionMatrix();
+
+      // You can practise before you've found the rifle.
+      this.weapon.hasRifle = true;
+      this.weapon.equip('rifle');
+      this.hud.setRangeMode(true);
+      this.hud.toast('Practice range. Targets from 25m to 500m — hold the matching scope mark.', 7000);
+    } else {
+      const w = this.savedWorld;
+      this.mode = 'wilderness';
+      this.activeScene = this.scene;
+      this.scene.add(this.camera);
+
+      this.controller.groundAt = w.groundAt;
+      this.controller.bounds = w.bounds;
+      this.controller.grid = w.grid;
+      this.controller.position.copy(w.pos);
+      this.controller.yaw = w.yaw;
+      this.controller.pitch = w.pitch;
+      this.controller.smoothY = w.pos.y;
+
+      this.camera.far = w.far;
+      this.camera.updateProjectionMatrix();
+
+      this.weapon.hasRifle = w.hasRifle;
+      this.weapon.equip(w.hasRifle ? w.equipped : null);
+      this.hud.setRangeMode(false);
+      this.level.refreshObjective();
+    }
+
+    this.state = 'playing';
+    this.hud.showPause(false);
+    this.input.lock();
+  }
+
+  /** The range's cut-down loop: aim, shoot, and nothing else. */
+  updateRange(dt) {
+    this.controller.update(dt);
+    this.weapon.update(dt);
+
+    // Practice shouldn't be gated on scavenging, so the magazine never runs
+    // dry here.
+    if (this.weapon.reserveAmmo < 10) this.weapon.reserveAmmo = 60;
+
+    this.hud.setAmmo(this.weapon.magAmmo, this.weapon.reserveAmmo, this.weapon.equipped === 'rifle');
   }
 
   // -------------------------------------------------------------- cutscene

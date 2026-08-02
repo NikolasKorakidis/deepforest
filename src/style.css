@@ -395,6 +395,20 @@ html, body {
 }
 .screen button:hover { background: rgba(216, 212, 200, 0.15); }
 
+#pause-actions {
+  display: flex;
+  gap: 14px;
+  justify-content: center;
+  margin-top: 22px;
+}
+
+/* Practice range: survival readouts don't apply there. */
+#hud.range-mode #stats,
+#hud.range-mode #counts,
+#hud.range-mode #clock,
+#hud.range-mode #objective,
+#hud.range-mode #compass { display: none !important; }
+
 #save-choice {
   display: flex;
   gap: 16px;

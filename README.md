@@ -50,7 +50,7 @@ not part of the running game — see the tree/lake design note below.
 | F | Eat a ration |
 | T | Build a campfire (costs 3 wood) |
 | E (at a lit fire) | Open the cook/sleep wheel |
-| Esc | Pause (releases the mouse) |
+| Esc | Pause (releases the mouse) — also the way into the shooting range |
 
 ## Gameplay loop
 
@@ -92,6 +92,23 @@ not part of the running game — see the tree/lake design note below.
 6. **The marker** — an orange flag on a rise beyond the forest ends the
    slice (~15–25 minutes for a focused run; slower if you explore).
 
+## Shooting range
+
+**Esc → SHOOTING RANGE** drops you into a second level: a flat practice
+range with ten steel plates from 25m out to 500m. It exists because the
+wilderness can't teach the rifle — it's a 400m basin full of trees, so
+there's nowhere to take a long shot and nothing that tells you whether you
+missed high or low. Here the ground is level, the sightlines are clear and a
+plate either rings and falls or it doesn't. Ammunition is unlimited, and
+you're handed the rifle whether or not you've found it yet.
+
+Each plate is hittable by ranging it with the scope and holding the matching
+BDC mark — mark 3 at 300m, and the half-step ticks for 150m and 250m. Under
+100m there's no mark and the drop is small enough to ignore. The survival
+sim is left running in the wilderness: no stats drain, no wolves, no quest
+progress and no autosave, so a run can't end or advance while you practise.
+**Esc → BACK TO THE VALLEY** returns you exactly where you left off.
+
 ## Saving
 
 The game autosaves to `localStorage` at each quest beat — no manual save
@@ -128,6 +145,7 @@ src/
     Fire.js               shared flame/ember/firelight effect (campfires + the wreck)
     Environment.js        day-night cycle: sun/moon, sky, fog, stars
     Level.js              hand-placed content: wreck, loot, lake, signs, checkpoint
+    ShootingRange.js      second level: flat practice range, plates 25-500m
   player/
     PlayerController.js   FPS movement, collision, head bob
     PlayerStats.js        health/hunger/thirst/warmth/energy simulation
@@ -232,6 +250,32 @@ Design notes:
   part-transparent; `pow(grow, 0.55)` pulls it up to full opacity early,
   without which a whole cluster of tongues still reads dimmer than the
   single always-on sprite this replaced.
+- The range is a second `THREE.Scene` rather than a far-off corner of the
+  wilderness, so it gets its own lighting, its own sky and no fog eating the
+  far targets — and none of the survival systems tick while you're in it.
+  Switching levels moves the camera between scenes (the viewmodels are its
+  children, so they come along), swaps which scene renders and which one
+  bullets raycast, and hands `PlayerController` a different ground function,
+  bounds and collider grid. Those three were hard-wired to the wilderness
+  heightfield and had to be made injectable — the old bounds alone would
+  have clamped the player to ±192m on a range that needs 500.
+- Two range-geometry problems, both found by working the numbers rather than
+  by looking:
+  - Ten targets on one centreline meant **five of them were invisible** —
+    the plate at 150m sits exactly on the line of sight to the plate at
+    500m. Each target now gets its own *angular* lane, which separates them
+    at any distance. The farthest target takes the centre lane and the
+    nearest the outermost, which is the cheap way round: a 25m plate
+    subtends ~1.3° and needs the most angular room, but converting that to
+    metres at 25m costs almost nothing, whereas giving the 500m plate an
+    outer lane would fling it 60m sideways. The range stays 48m wide.
+  - Close plates were **unhittable**. This rifle's drop is exaggerated ~12x,
+    so at 75m a shot placed dead on the aiming mark lands half a metre low —
+    below a plate sized for realism, and the reticle has no mark that fine.
+    Plates got a bigger base size so short range is a warm-up rather than a
+    puzzle. Verified end to end by integrating the real trajectory: every
+    target from 25m to 500m lands inside its plate, and 100m–500m land
+    within 2cm of plate centre.
 - Objective text is regenerated from live state every time
   (`Level.refreshObjective`) rather than written once at each transition.
   That's what lets a counter tick as you pick things up, and it means a

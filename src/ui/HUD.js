@@ -99,7 +99,11 @@ export class HUD {
       </div>
 
       <div id="pause-screen" class="screen hidden">
-        <div class="panel"><h2>PAUSED</h2><p class="begin">CLICK TO RESUME</p></div>
+        <div class="panel">
+          <h2>PAUSED</h2>
+          <p class="begin">CLICK TO RESUME</p>
+          <div id="pause-actions"><button id="range-btn">SHOOTING RANGE</button></div>
+        </div>
       </div>
 
       <div id="death-screen" class="screen hidden">
@@ -130,6 +134,7 @@ export class HUD {
     this.compassCtx = this.el('compass').getContext('2d');
     this._toastCount = 0;
     this._pauseResumeHandler = null;
+    this._rangeHandler = null;
 
     this.el('retry-btn').addEventListener('click', () => location.reload());
     this.el('end-retry-btn').addEventListener('click', () => location.reload());
@@ -346,6 +351,12 @@ export class HUD {
 
   /** Swaps the loading screen out for the real start screen — called once
    *  every requested asset has settled (see Game.js / assets.js). */
+  /** Hides the survival readouts on the practice range — stats, clock,
+   *  objective and inventory mean nothing there and only add noise. */
+  setRangeMode(on) {
+    document.getElementById('hud').classList.toggle('range-mode', on);
+  }
+
   hideLoading() {
     this.el('loading-screen').classList.add('hidden');
     this.el('start-screen').classList.remove('hidden');
@@ -379,9 +390,24 @@ export class HUD {
     }
   }
 
-  showPause(visible, onResume) {
+  /**
+   * @param onToggleRange switches between the wilderness and the practice
+   *   range. `inRange` picks the button's wording.
+   */
+  showPause(visible, onResume, { onToggleRange, inRange = false } = {}) {
     const screen = this.el('pause-screen');
     screen.classList.toggle('hidden', !visible);
+
+    const rangeBtn = this.el('range-btn');
+    rangeBtn.textContent = inRange ? 'BACK TO THE VALLEY' : 'SHOOTING RANGE';
+    if (this._rangeHandler) rangeBtn.removeEventListener('click', this._rangeHandler);
+    this._rangeHandler = (e) => {
+      // The whole pause screen is a click-to-resume target, so without this
+      // the button would resume *and* switch levels.
+      e.stopPropagation();
+      if (onToggleRange) onToggleRange();
+    };
+    rangeBtn.addEventListener('click', this._rangeHandler);
     // Not a one-shot listener: browsers impose a brief cooldown on
     // re-requesting pointer lock right after an Escape-driven unlock, so
     // the first click can silently fail to actually resume. Keep the

@@ -28,6 +28,17 @@ export class PlayerController {
     this.crouchToggled = false; // KeyC toggles; Ctrl still crouches only while held
     this.proneToggled = false; // KeyZ toggles
 
+    // Where the ground is, what stops you and how far you can walk are all
+    // injectable rather than hard-wired to the wilderness heightfield, so a
+    // second level (the shooting range) can supply flat ground, no
+    // obstacles and its own much longer bounds without the controller
+    // knowing anything about either place.
+    this.groundAt = terrainHeight;
+    this.bounds = {
+      minX: WORLD.minX + 8, maxX: WORLD.maxX - 8,
+      minZ: WORLD.minZ + 8, maxZ: WORLD.maxZ - 8,
+    };
+
     camera.rotation.order = 'YXZ';
     input.onPress('KeyC', () => { this.crouchToggled = !this.crouchToggled; });
     input.onPress('KeyZ', () => { this.proneToggled = !this.proneToggled; });
@@ -100,9 +111,10 @@ export class PlayerController {
     let nx = this.position.x + this.vel.x * dt;
     let nz = this.position.z + this.vel.z * dt;
     [nx, nz] = this.grid.resolveCircle(nx, nz, P.radius);
-    nx = clamp(nx, WORLD.minX + 8, WORLD.maxX - 8);
-    nz = clamp(nz, WORLD.minZ + 8, WORLD.maxZ - 8);
-    this.position.set(nx, terrainHeight(nx, nz), nz);
+    const b = this.bounds;
+    nx = clamp(nx, b.minX, b.maxX);
+    nz = clamp(nz, b.minZ, b.maxZ);
+    this.position.set(nx, this.groundAt(nx, nz), nz);
 
     // --- camera: smoothed ground follow + head bob ---
     this.smoothY += (this.position.y - this.smoothY) * Math.min(1, dt * 12);
