@@ -17,20 +17,10 @@ import woodPileUrl from '../assets/models/wood_pile.glb?url';
 
 const BASE_LAKE_TREE_HEIGHT = 7; // slightly taller than the ambient forest for a set-piece feel
 
-// Quest chain. Named rather than bare numbers because the stage number is
-// persisted in saves, so the mapping has to be legible when it changes
-// (and SAVE_VERSION bumped when it does — see core/save.js).
-const QUEST = { INVESTIGATE: 1, FIRE: 2, SLEEP: 3, WATER: 4, DONE: 5 };
-
-/** The crash-site pickups the "investigate the crash" counter counts. Their
- *  ids are the same ones takenPickups persists, so the counter survives a
- *  save/load for free. */
-const CRASH_ITEMS = ['rifle', 'compass', 'binoculars', 'rations'];
-
-const FIRE_WOOD_COST = 3; // mirrors CONFIG.fire.woodCost, for the objective counter
-
-/** How close to the lake triggers the one-off wolf sighting. */
-const WOLF_SIGHTING_RADIUS = 46;
+// The quest chain was removed: the game is the shooting range now, and a
+// survival objective list pulling the player away from it was working
+// against that. Everything the quests used to gate — the loot, the fire,
+// the lake — is still here and still works, it just isn't scripted.
 
 // The crashed helicopter sits in the spawn clearing — the one hand-placed
 // landmark in an otherwise fully procedural world, and the reason the
@@ -51,9 +41,8 @@ const HELICOPTER = {
 export class Level {
   /** @param takenPickups Set of pickup ids to skip entirely (restoring a save
    *   — those items were already collected in a previous session).
-   *  @param onQuestAdvance(stage) called right after questStage changes —
-   *   Game.js uses this to autosave at each quest beat. */
-  constructor({ scene, grid, interactions, inventory, weapon, stats, hud, sfx, takenPickups, onQuestAdvance, firewoodSpots, treeSpots, onWolfSighting }) {
+   */
+  constructor({ scene, grid, interactions, inventory, weapon, stats, hud, sfx, takenPickups, firewoodSpots, treeSpots }) {
     this.scene = scene;
     this.grid = grid;
     this.interactions = interactions;
@@ -63,22 +52,14 @@ export class Level {
     this.hud = hud;
     this.sfx = sfx;
     this.takenPickups = takenPickups || new Set();
-    this.onQuestAdvance = onQuestAdvance || (() => {});
     this.firewoodSpots = firewoodSpots || [];
     this.treeSpots = treeSpots || [];
-    this.onWolfSighting = onWolfSighting || (() => false);
-    this.wolfSightingPlayed = false;
-    this._sightingRetry = 0;
 
     this.t = 0;
     this.pickupSprites = [];
     this.smoke = [];
     this.wreckFiresOut = false; // set once the crash fire has burned itself out
 
-    // Quest chain: investigate the crash -> build a fire -> sleep -> find
-    // water -> done. Each advance shows the completed line, then swaps in
-    // the next objective a few seconds later so there's time to read it.
-    this.questStage = QUEST.INVESTIGATE;
 
     this._buildHelicopter();
     this._placeStartingLoadout();
@@ -213,7 +194,6 @@ export class Level {
         this.sfx.pickup();
         this.scene.remove(mesh);
         entry.disabled = true;
-        if (CRASH_ITEMS.includes(id)) this._notifyCrashItemTaken();
       },
     });
   }
@@ -288,102 +268,6 @@ export class Level {
     }, { id: 'rations' });
   }
 
-  // ------------------------------------------------------------------ quest
-  /** How many of the crash-site items the player is currently carrying.
-   *  Derived from takenPickups rather than counted up as we go, so a
-   *  restored save reports the right number without storing it twice. */
-  get crashItemsTaken() {
-    return CRASH_ITEMS.filter((id) => this.takenPickups.has(id)).length;
-  }
-
-  /**
-   * Writes the objective line for the current stage, counters and all.
-   * Every stage's text is regenerated from live state here rather than
-   * being set once at the transition — which is what lets a counter tick
-   * ("2/4", "1/3 wood") and what lets a restored save show the right line
-   * without replaying the transition messages.
-   */
-  refreshObjective() {
-    const wood = Math.min(this.inventory.wood, FIRE_WOOD_COST);
-    switch (this.questStage) {
-      case QUEST.INVESTIGATE:
-        return this.hud.setObjective(
-          `Investigate the crash   ${this.crashItemsTaken}/${CRASH_ITEMS.length}`,
-          false, 'Search the wreck for anything you can carry.'
-        );
-      case QUEST.FIRE:
-        return this.hud.setObjective(
-          `Build a fire   ${wood}/${FIRE_WOOD_COST} wood`,
-          false, 'Press E at any tree to gather wood. Then T to build.'
-        );
-      case QUEST.SLEEP:
-        return this.hud.setObjective(
-          'Sleep', false, 'Press E at the fire and choose Sleep.'
-        );
-      case QUEST.WATER:
-        return this.hud.setObjective(
-          'Find water', false, 'There is a lake somewhere north-east.'
-        );
-      default:
-        return this.hud.setObjective('Survive', true);
-    }
-  }
-
-  _advanceTo(stage, completedText, delay = 3800) {
-    this.questStage = stage;
-    this.hud.setObjective(completedText, true);
-    setTimeout(() => this.refreshObjective(), delay);
-    this.onQuestAdvance(stage);
-  }
-
-  /** Called whenever a crash-site item is picked up. */
-  _notifyCrashItemTaken() {
-    if (this.questStage !== QUEST.INVESTIGATE) return;
-    if (this.crashItemsTaken < CRASH_ITEMS.length) {
-      this.refreshObjective(); // just tick the counter
-      return;
-    }
-    this._advanceTo(QUEST.FIRE, 'Crash site stripped');
-    this.hud.toast("Nothing else here worth carrying. You won't last the night without a fire.", 6500);
-    setTimeout(
-      () => this.hud.toast('Head into the trees — press E at a trunk to break off branches.', 6000),
-      6800
-    );
-  }
-
-  /** Called by the firewood pickups so the wood counter tracks live. */
-  _notifyWoodTaken() {
-    if (this.questStage === QUEST.FIRE) this.refreshObjective();
-  }
-
-  /** Called by Game.js right after a campfire is successfully built. */
-  notifyCampfireBuilt() {
-    if (this.questStage !== QUEST.FIRE) return;
-    this._advanceTo(QUEST.SLEEP, 'Fire lit');
-    this.hud.toast('Warmth at last. Rest while it burns.', 5500);
-  }
-
-  /** True while the quest is explicitly telling the player to sleep.
-   *  Sleeping is normally gated on it being dark enough, but the objective
-   *  chain can hand you that instruction after sunrise (gathering three
-   *  wood can easily take past dawn) — without this the required step is
-   *  simply unavailable and the run stalls until evening. */
-  get questWantsSleep() {
-    return this.questStage === QUEST.SLEEP;
-  }
-
-  /** Called by Game.js right after the player sleeps. */
-  notifySlept() {
-    if (this.questStage !== QUEST.SLEEP) return;
-    this._advanceTo(QUEST.WATER, 'Rested');
-    this.hud.toast('Midday. Your throat is raw — you need water.', 6000);
-  }
-
-  /** Called by the lake's drink interaction. */
-  _completeWaterQuest() {
-    if (this.questStage !== QUEST.WATER) return;
-    this._advanceTo(QUEST.DONE, 'Found water');
-  }
 
   // ------------------------------------------------------------------- wood
   /**
@@ -429,7 +313,6 @@ export class Level {
           this.inventory.wood += 1;
           this.sfx.build(); // woody thud rather than the item-pickup blip
           entry.disabled = true; // one armful per tree, so you keep moving
-          this._notifyWoodTaken();
         },
       });
     }
@@ -483,7 +366,6 @@ export class Level {
           this.inventory.wood += 2;
           this.sfx.pickup();
           entry.disabled = true;
-          this._notifyWoodTaken();
           for (const part of this.woodParts) {
             part.setMatrixAt(i, ZERO);
             part.instanceMatrix.needsUpdate = true;
@@ -532,7 +414,6 @@ export class Level {
         this.stats.drink();
         this.sfx.drink();
         this.hud.toast('You drink deeply. The water is ice-cold and clean.');
-        this._completeWaterQuest();
       },
     });
   }
@@ -663,25 +544,6 @@ export class Level {
     if (this.water && env?.sun) updateWaterSurface(this.water, dt, env.sun);
     if (env) this._updateWreckFires(dt, env);
 
-    // First approach to the lake while looking for water: hand off to Game
-    // for the binocular wolf sighting. Fires once, and only during the
-    // water objective, so it can't interrupt anything else.
-    //
-    // Game can decline (the wolf isn't actually visible yet), in which case
-    // nothing is consumed and we ask again shortly — polled on a timer
-    // rather than every frame because the check costs a scene raycast.
-    if (
-      !this.wolfSightingPlayed &&
-      this.questStage === QUEST.WATER &&
-      playerPos &&
-      Math.hypot(playerPos.x - POND.x, playerPos.z - POND.z) < WOLF_SIGHTING_RADIUS
-    ) {
-      this._sightingRetry -= dt;
-      if (this._sightingRetry <= 0) {
-        this._sightingRetry = 0.3;
-        if (this.onWolfSighting()) this.wolfSightingPlayed = true;
-      }
-    }
 
     // pickup glow pulse
     const pulse = 0.24 + Math.sin(this.t * 2.5) * 0.1;

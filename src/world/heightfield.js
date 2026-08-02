@@ -47,12 +47,43 @@ export function fbm(x, z, octaves = 4, seed = 0) {
 // is regenerated identically on every load with nothing to store.
 // ---------------------------------------------------------------------------
 
+// The basin is 400 wide but runs long to the north, because the shooting
+// range shares this map and a 500m lane simply does not fit in a 400m box —
+// the diagonal would have to run through the crash site to be long enough.
 export const WORLD = {
   minX: -200, maxX: 200,
-  minZ: -200, maxZ: 200,
-  sizeX: 400, sizeZ: 400,
-  centerX: 0, centerZ: 0,
+  minZ: -560, maxZ: 200,
+  sizeX: 400, sizeZ: 760,
+  centerX: 0, centerZ: -180,
 };
+
+/**
+ * The shooting range: a cleared lane running north from a firing line near
+ * the crash site. Placed off to the west of the spawn clearing and well
+ * clear of the lake, so it's a short walk from where you wake up rather
+ * than a separate place you teleport to.
+ */
+export const RANGE = {
+  laneX: -40,
+  firingZ: 30,
+  maxDist: 500,
+  halfWidth: 20,   // flat ground either side of the centre line
+  shoulder: 26,    // blend distance back out to natural terrain
+  laneY: 1.4,
+};
+
+const RANGE_END_Z = RANGE.firingZ - RANGE.maxDist - 45;
+
+/** 0..1 — how much (x, z) is inside the cleared lane. Vegetation uses this
+ *  to keep the lane open, and terrainHeight to flatten it. */
+export function rangeCorridor(x, z) {
+  if (z > RANGE.firingZ + 25 || z < RANGE_END_Z) return 0;
+  const across = 1 - smoothstep(RANGE.halfWidth, RANGE.halfWidth + RANGE.shoulder, Math.abs(x - RANGE.laneX));
+  if (across <= 0) return 0;
+  const ends = smoothstep(RANGE_END_Z, RANGE_END_Z + 35, z)
+    * (1 - smoothstep(RANGE.firingZ + 6, RANGE.firingZ + 25, z));
+  return across * ends;
+}
 
 /** Where the player starts — a small natural clearing at the origin. */
 export const SPAWN_CLEARING_RADIUS = 16;
@@ -101,6 +132,14 @@ export function terrainHeight(x, z) {
     const toBed = 1 - smoothstep(POND_RADIUS + 6, POND_RADIUS + 20, dpond);
     h = lerp(h, lakeBed(dpond), toBed);
   }
+
+  // Range lane, applied last so it wins: a dead-flat firing lane is the
+  // whole point, and it has to cut straight through the ridge ring that
+  // would otherwise rear up 60m across the far half of it. The ridge is
+  // left standing either side, which frames the lane like a cutting and
+  // gives long shots a backstop.
+  const lane = rangeCorridor(x, z);
+  if (lane > 0) h = lerp(h, RANGE.laneY, lane);
 
   return h;
 }

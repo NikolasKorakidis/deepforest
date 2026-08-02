@@ -11,8 +11,13 @@ import {
  * lake, rock on steep slopes and snow on the high ridge.
  */
 export function createTerrain() {
-  const segs = 260;
-  const geo = new THREE.PlaneGeometry(WORLD.sizeX, WORLD.sizeZ, segs, segs);
+  // Segments follow the world's aspect rather than being square, so the
+  // long northern arm holding the range lane keeps the same ~1.5m vertex
+  // spacing as the basin instead of being stretched coarse.
+  const spacing = 1.55;
+  const segX = Math.round(WORLD.sizeX / spacing);
+  const segZ = Math.round(WORLD.sizeZ / spacing);
+  const geo = new THREE.PlaneGeometry(WORLD.sizeX, WORLD.sizeZ, segX, segZ);
   geo.rotateX(-Math.PI / 2);
   geo.translate(WORLD.centerX, 0, WORLD.centerZ);
 

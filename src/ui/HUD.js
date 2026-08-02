@@ -57,6 +57,8 @@ export class HUD {
       </div>
 
       <canvas id="compass" width="300" height="34" class="hidden"></canvas>
+      <div id="wind"><canvas id="wind-dial" width="96" height="96"></canvas><div id="wind-speed"></div></div>
+      <div id="score"><span id="score-value">0</span><span id="score-streak"></span></div>
       <div id="clock"></div>
       <div id="objective" class="hidden"></div>
       <div id="crosshair" class="hidden"></div>
@@ -78,9 +80,10 @@ export class HUD {
       <div id="start-screen" class="screen hidden">
         <div class="panel">
           <h1>DEEP FOREST</h1>
-          <p class="story">The helicopter went down in the dark. It's still burning.<br>
-          You are hurt, cold, and alone — and the valley ahead is the only way out.<br>
-          Look for survivors. Scavenge what you can. Follow the path north.</p>
+          <p class="story">The helicopter went down at first light. It's still burning.<br>
+          West of the wreck someone cut a firing lane into the hillside —
+          steel plates from 25 to 500 metres.<br>
+          Range them, read the wind, and see what you can hit.</p>
           <div class="controls">
             <span><b>WASD</b> move</span><span><b>Shift</b> sprint</span>
             <span><b>C / Ctrl</b> crouch</span><span><b>Z</b> prone</span>
@@ -88,6 +91,7 @@ export class HUD {
             <span><b>LMB</b> fire</span><span><b>RMB</b> toggle aim / zoom</span>
             <span><b>R</b> reload</span><span><b>1 / 2</b> rifle / binoculars</span>
             <span><b>F</b> eat ration</span><span><b>T</b> build campfire</span>
+            <span><b>Wind</b> dial, top right</span><span><b>Scope</b> marks = 100m each</span>
             <span><b>E</b> at fire: cook / sleep</span><span><b>Esc</b> pause</span>
           </div>
           <p class="begin" id="begin-fresh">CLICK TO BEGIN</p>
@@ -102,7 +106,6 @@ export class HUD {
         <div class="panel">
           <h2>PAUSED</h2>
           <p class="begin">CLICK TO RESUME</p>
-          <div id="pause-actions"><button id="range-btn">SHOOTING RANGE</button></div>
         </div>
       </div>
 
@@ -134,7 +137,6 @@ export class HUD {
     this.compassCtx = this.el('compass').getContext('2d');
     this._toastCount = 0;
     this._pauseResumeHandler = null;
-    this._rangeHandler = null;
 
     this.el('retry-btn').addEventListener('click', () => location.reload());
     this.el('end-retry-btn').addEventListener('click', () => location.reload());
@@ -188,6 +190,77 @@ export class HUD {
       hint.textContent = note;
       el.appendChild(hint);
     }
+  }
+
+  // ------------------------------------------------------------ wind gauge
+  /**
+   * Sniper-Elite-style wind dial. The needle shows wind direction *relative
+   * to where the player is looking*, which is the only frame that helps:
+   * what a shooter needs to know is whether it pushes left or right across
+   * their own sightline, not its compass bearing. Straight up means the
+   * wind is blowing away from you (no drift); pointing right means it will
+   * carry the bullet right.
+   *
+   * @param wind        the shared Wind instance
+   * @param headingRad  the player's yaw
+   */
+  setWind(wind, headingRad) {
+    const ctx = this.el('wind-dial').getContext('2d');
+    const cx = 48, cy = 48, R = 34;
+    ctx.clearRect(0, 0, 96, 96);
+
+    ctx.strokeStyle = 'rgba(216,212,200,0.35)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(cx, cy, R, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // Cross ticks, so "sideways" is readable at a glance.
+    ctx.strokeStyle = 'rgba(216,212,200,0.22)';
+    ctx.lineWidth = 1;
+    for (let i = 0; i < 4; i++) {
+      const a = (i / 4) * Math.PI * 2;
+      ctx.beginPath();
+      ctx.moveTo(cx + Math.cos(a) * (R - 6), cy + Math.sin(a) * (R - 6));
+      ctx.lineTo(cx + Math.cos(a) * R, cy + Math.sin(a) * R);
+      ctx.stroke();
+    }
+
+    // World bearing of the wind, minus where the player faces.
+    const rel = Math.atan2(wind.x, -wind.z) - headingRad;
+    const strength = Math.min(1, wind.speed / 12);
+    const len = 8 + strength * (R - 12);
+
+    // Canvas y grows downward, hence the negated sine: screen-up is "away".
+    const tipX = cx + Math.sin(rel) * len;
+    const tipY = cy - Math.cos(rel) * len;
+
+    ctx.strokeStyle = strength > 0.62 ? '#e0733c' : '#e8e4d8';
+    ctx.fillStyle = ctx.strokeStyle;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(tipX, tipY);
+    ctx.stroke();
+
+    // Arrowhead
+    const ah = 7;
+    ctx.beginPath();
+    ctx.moveTo(tipX, tipY);
+    ctx.lineTo(tipX - Math.sin(rel - 0.42) * ah, tipY + Math.cos(rel - 0.42) * ah);
+    ctx.lineTo(tipX - Math.sin(rel + 0.42) * ah, tipY + Math.cos(rel + 0.42) * ah);
+    ctx.closePath();
+    ctx.fill();
+
+    this.el('wind-speed').textContent = `${wind.speed.toFixed(1)} m/s`;
+  }
+
+  // ---------------------------------------------------------------- score
+  setScore(score, streak = 0) {
+    this.el('score-value').textContent = String(score);
+    const el = this.el('score-streak');
+    el.textContent = streak > 1 ? `x${streak}` : '';
+    el.classList.toggle('hot', streak >= 3);
   }
 
   // --------------------------------------------------------------- compass
@@ -390,24 +463,10 @@ export class HUD {
     }
   }
 
-  /**
-   * @param onToggleRange switches between the wilderness and the practice
-   *   range. `inRange` picks the button's wording.
-   */
-  showPause(visible, onResume, { onToggleRange, inRange = false } = {}) {
+  showPause(visible, onResume) {
     const screen = this.el('pause-screen');
     screen.classList.toggle('hidden', !visible);
 
-    const rangeBtn = this.el('range-btn');
-    rangeBtn.textContent = inRange ? 'BACK TO THE VALLEY' : 'SHOOTING RANGE';
-    if (this._rangeHandler) rangeBtn.removeEventListener('click', this._rangeHandler);
-    this._rangeHandler = (e) => {
-      // The whole pause screen is a click-to-resume target, so without this
-      // the button would resume *and* switch levels.
-      e.stopPropagation();
-      if (onToggleRange) onToggleRange();
-    };
-    rangeBtn.addEventListener('click', this._rangeHandler);
     // Not a one-shot listener: browsers impose a brief cooldown on
     // re-requesting pointer lock right after an Escape-driven unlock, so
     // the first click can silently fail to actually resume. Keep the

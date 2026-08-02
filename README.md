@@ -1,9 +1,11 @@
 # Deep Forest
 
-A browser-based first-person survival slice built with **Three.js** and **Vite**.
-You wake beside a crashed helicopter in a forested wilderness basin — injured,
-cold and hungry — and have to find water, get a fire going before nightfall,
-and survive the wolves that hold the lake.
+A browser-based first-person **long-range shooting** game built with
+**Three.js** and **Vite**. You wake beside a crashed helicopter in a forested
+wilderness basin; west of the wreck, a firing lane has been cut into the
+hillside with pop-up steel from 25 to 500 metres. Range them, read the wind,
+and score. The survival layer — fire, food, water, the wolves that hold the
+lake — is still there around the edges, but the rifle is the game.
 
 The world is generated procedurally from a single deterministic height
 function: rolling forested hills, meadows and dense woodland, a lake off to
@@ -50,73 +52,39 @@ not part of the running game — see the tree/lake design note below.
 | F | Eat a ration |
 | T | Build a campfire (costs 3 wood) |
 | E (at a lit fire) | Open the cook/sleep wheel |
-| Esc | Pause (releases the mouse) — also the way into the shooting range |
+| Esc | Pause (releases the mouse) |
 
 ## Gameplay loop
 
-1. **Crash site** — you start in a clearing at the origin beside the burning
-   wreck. Scavenge it: rifle + magazines, compass, binoculars, rations.
-2. **Explore** — open meadow gives way to dense forest in every direction.
-   Wood comes from the woods themselves rather than from set-piece drops:
-   press **E** at any tree to break off an armful (+1, once per tree), and
-   roughly every tenth tree also has a fallen pile at its foot worth +2.
-3. **Stats tick down** — hunger, thirst and energy drain over time; warmth
-   drops hard at night and at altitude. Empty bars bleed health. Eat rations
-   (F) and build a campfire (T) before dark. Press E beside a lit fire to
-   open a cook/sleep wheel: Cook (eat a ration for a bigger restore than raw,
-   if you have one) or Sleep (wakes you at midday; burns the fire down to
-   embers). Sleeping normally needs it to be dim out — except while the
-   quest is asking for it, so the chain can't stall you until evening.
-4. **The quest chain**, tracked top-left with live counters:
-   1. **Investigate the crash** `0/4` — the rifle (with its magazines),
-      compass, binoculars and rations, scattered around the wreck.
-   2. **Build a fire** `0/3 wood` — the counter follows what you're
-      carrying, hinting you into the woods for branches.
-   3. **Sleep** — at the fire you just built. You wake at 12:00.
-   4. **Find water** — nearing the lake triggers the one scripted beat: you
-      raise the binoculars and find a wolf watching from across the water.
-      Drinking completes the chain.
-
-   Autosaves at each beat (see Saving).
-5. **Wolves** — six in all. Four dens ring the lake, spread across the half
-   of the shore away from the approach you walk in on, so the water is
-   contested ground rather than an ambush the moment you arrive. Two more
-   sit up on the ridge that overlooks the lake from the north-east — far
-   enough out (~80m) to be a separate encounter for anyone who climbs
-   rather than extra pressure at the waterline. They aggro at 20m (day or
-   night), close in at a run, then drop to a stalking creep before lunging,
-   and they path *around* the lake rather than trotting across it. A
-   headshot drops one instantly; a body shot leaves it wounded and visibly
-   slowed, and the next shot finishes it. You can also just outrun them —
-   easily, once one is wounded.
-6. **The marker** — an orange flag on a rise beyond the forest ends the
-   slice (~15–25 minutes for a focused run; slower if you explore).
-
-## Shooting range
-
-**Esc → SHOOTING RANGE** drops you into a second level: a flat practice
-range with ten steel plates from 25m out to 500m. It exists because the
-wilderness can't teach the rifle — it's a 400m basin full of trees, so
-there's nowhere to take a long shot and nothing that tells you whether you
-missed high or low. Here the ground is level, the sightlines are clear and a
-plate either rings and falls or it doesn't. Ammunition is unlimited, and
-you're handed the rifle whether or not you've found it yet.
-
-Each plate is hittable by ranging it with the scope and holding the matching
-BDC mark — mark 3 at 300m, and the half-step ticks for 150m and 250m. Under
-100m there's no mark and the drop is small enough to ignore. The survival
-sim is left running in the wilderness: no stats drain, no wolves, no quest
-progress and no autosave, so a run can't end or advance while you practise.
-**Esc → BACK TO THE VALLEY** returns you exactly where you left off.
+1. **The range** — 40m west of the wreck, a cleared lane with ten pop-up
+   plates at 25, 50, 75, 100, 150, 200, 250, 300, 400 and 500m. Plates rise,
+   wait, and drop again, so there's a reason to stay on the glass and a
+   reason to hurry.
+2. **Range it, then hold** — RMB scopes in; the rangefinder reads the
+   distance to whatever is centred. Hold the matching BDC mark (mark 3 at
+   300m, half-step ticks for 150m and 250m) and the shot lands on the plate.
+   Under 100m the drop is small enough to ignore.
+3. **Read the wind** — the dial top-right shows wind *relative to where
+   you're looking*: straight up means it's blowing away from you, right
+   means it will carry the bullet right. The windsocks down the lane say the
+   same thing in the world. Under 200m wind is negligible; at 400m and 500m
+   ignoring it is a clean miss.
+4. **Score** — each plate is worth `10 + distance/10`, so the 500m plate pays
+   about five times the 25m one. Chained hits build a multiplier up to x5;
+   let six seconds lapse without a hit and it resets.
+5. **The wilderness is still there** — gather wood (E at any tree), build a
+   fire (T), cook and sleep at it, drink at the lake. Six wolves hold the
+   water and the ridge above it; a headshot drops one instantly, a body shot
+   wounds and slows it.
 
 ## Saving
 
-The game autosaves to `localStorage` at each quest beat — no manual save
+The game autosaves to `localStorage` every 30 seconds — no manual save
 action. Reloading the page offers **Continue** (restores position,
-stats, inventory, ammo, quest stage, day/time, and any campfires still
+stats, inventory, ammo, score, day/time, and any campfires still
 burning — collected pickups stay collected) or **New Game** (discards the
-save). The save is also cleared on death or reaching the trail marker, since
-neither is a state worth continuing from.
+save). The save is cleared on death, since that isn't a state worth
+continuing from.
 
 ## Code layout
 
@@ -144,8 +112,9 @@ src/
     Water.js              reflective lake surface + shoreline blend (see design note below)
     Fire.js               shared flame/ember/firelight effect (campfires + the wreck)
     Environment.js        day-night cycle: sun/moon, sky, fog, stars
-    Level.js              hand-placed content: wreck, loot, lake, signs, checkpoint
-    ShootingRange.js      second level: flat practice range, plates 25-500m
+    Level.js              hand-placed content: wreck, loot, lake, checkpoint
+    Range.js              the shooting range: pop-up plates, scoring, windsocks
+    Wind.js               wind vector — read by ballistics, grass and the HUD dial
   player/
     PlayerController.js   FPS movement, collision, head bob
     PlayerStats.js        health/hunger/thirst/warmth/energy simulation
@@ -250,15 +219,17 @@ Design notes:
   part-transparent; `pow(grow, 0.55)` pulls it up to full opacity early,
   without which a whole cluster of tongues still reads dimmer than the
   single always-on sprite this replaced.
-- The range is a second `THREE.Scene` rather than a far-off corner of the
-  wilderness, so it gets its own lighting, its own sky and no fog eating the
-  far targets — and none of the survival systems tick while you're in it.
-  Switching levels moves the camera between scenes (the viewmodels are its
-  children, so they come along), swaps which scene renders and which one
-  bullets raycast, and hands `PlayerController` a different ground function,
-  bounds and collider grid. Those three were hard-wired to the wilderness
-  heightfield and had to be made injectable — the old bounds alone would
-  have clamped the player to ±192m on a range that needs 500.
+- The range lives in the main world rather than a scene of its own. A 500m
+  lane does not fit in a 400m basin — the diagonal is barely long enough and
+  would run straight through the crash site — so the world grew a long
+  northern arm, and `heightfield.rangeCorridor` carves a dead-flat lane
+  through it, cutting clean through the ridge ring that would otherwise rear
+  up 60m across the far half. The ridge is left standing either side, which
+  frames the lane and gives long shots a backstop. Vegetation reads the same
+  corridor function, so nothing grows in the firing line.
+- Fog had to be thinned hard (0.0065 to 0.0014 by day). `FogExp2` falls off
+  with the *square* of distance, so the old value left a 500m plate at about
+  3% visibility — the far end of the range was quite literally not there.
 - Two range-geometry problems, both found by working the numbers rather than
   by looking:
   - Ten targets on one centreline meant **five of them were invisible** —
@@ -276,6 +247,21 @@ Design notes:
     puzzle. Verified end to end by integrating the real trajectory: every
     target from 25m to 500m lands inside its plate, and 100m–500m land
     within 2cm of plate centre.
+- Wind is one object read by three unrelated consumers — the bullet solver,
+  the grass shader and the HUD dial. That sharing is the whole design: what
+  the dial shows *is* the vector that pushes the bullet, so a player who
+  learns to read it is actually right, and the grass leaning downwind is a
+  second opinion on the same number rather than decoration. The dial shows
+  wind relative to where you're looking rather than as a compass bearing,
+  because what a shooter needs is whether it pushes left or right across
+  their own sightline.
+- Drift is modelled as a constant sideways acceleration, so it grows with
+  the square of time of flight exactly as drop does — negligible up close,
+  decisive far out. The strength was tuned against plate sizes rather than
+  picked: at 5 m/s a 500m shot moves 2.5m against a 1.75m plate half-width
+  (a clean miss if ignored) while a 100m shot moves 10cm. The first value
+  tried drifted less than a plate half-width at *every* range, which made
+  wind purely decorative — the gauge would have been lying about mattering.
 - Objective text is regenerated from live state every time
   (`Level.refreshObjective`) rather than written once at each transition.
   That's what lets a counter tick as you pick things up, and it means a

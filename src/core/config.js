@@ -68,6 +68,18 @@ export const CONFIG = {
     muzzleVelocity: 808,
     bulletGravity: 117,
     bulletLifetime: 4, // seconds before an unresolved shot is given up on
+    // Crosswind. A real bullet is pushed by the difference between its own
+    // flight and the moving air, which over short flights behaves like a
+    // near-constant sideways acceleration — so drift grows with the square
+    // of time of flight, exactly like drop, and is negligible up close but
+    // decisive far out. windDrift is that acceleration per m/s of wind:
+    //   drift = ½ · (windDrift · windSpeed) · t²
+    // Tuned against plate sizes rather than picked: at 2.6 a 5 m/s
+    // crosswind moves a 500m shot ~2.5m against a 1.75m plate half-width —
+    // a clean miss if ignored — while at 100m it's 10cm and irrelevant. The
+    // earlier 1.5 drifted less than a plate's half-width at every range, so
+    // wind was purely decorative.
+    windDrift: 2.6,
   },
 
   wolf: {

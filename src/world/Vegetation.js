@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import {
   terrainHeight, hash2, forestDensity, POND, POND_RADIUS, WORLD,
-  SPAWN_CLEARING_RADIUS,
+  SPAWN_CLEARING_RADIUS, rangeCorridor,
 } from './heightfield.js';
 import { loadTreeAssets } from './TreeAssets.js';
 
@@ -147,6 +147,8 @@ function scatterTrees(scene, grid, chunkMap) {
 
       if (Math.hypot(x, z) < SPAWN_CLEARING_RADIUS) continue; // keep spawn open
       if (inLake(x, z, 4)) continue;
+      // A shooting lane with trees down it isn't a shooting lane.
+      if (rangeCorridor(x, z) > 0.05) continue;
 
       const y = terrainHeight(x, z);
       if (y > 30) continue;                 // treeline on the ridge
@@ -215,7 +217,14 @@ function buildSpeciesInstances(parent, spots, species) {
 // ------------------------------------------------------------------- grass
 
 // Wind time, shared by every grass instance. Advanced by updateVegetation().
-const grassUniforms = { uTime: { value: 0 } };
+const grassUniforms = {
+  uTime: { value: 0 },
+  // Wind direction (unit XZ) and strength, so the grass leans and ripples
+  // along the same vector the bullet is pushed by. Reading the field is
+  // meant to be a real alternative to reading the gauge.
+  uWind: { value: new THREE.Vector2(1, 0) },
+  uWindStrength: { value: 0.4 },
+};
 
 /**
  * "Paper" grass: a clump of flat cards, alpha-cut to blade silhouettes.
@@ -304,8 +313,10 @@ function makeGrassMaterial() {
 
   material.onBeforeCompile = (shader) => {
     shader.uniforms.uTime = grassUniforms.uTime;
+    shader.uniforms.uWind = grassUniforms.uWind;
+    shader.uniforms.uWindStrength = grassUniforms.uWindStrength;
     shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', `#include <common>\n uniform float uTime;`)
+      .replace('#include <common>', `#include <common>\n uniform float uTime;\n uniform vec2 uWind;\n uniform float uWindStrength;`)
       .replace(
         '#include <begin_vertex>',
         `#include <begin_vertex>
@@ -315,12 +326,17 @@ function makeGrassMaterial() {
           // blade swaying in lockstep.
           vec3 iPos = instanceMatrix[3].xyz;
           float phase = iPos.x * 0.28 + iPos.z * 0.21;
-          float gust = sin(uTime * 1.5 + phase) * 0.55
-                     + sin(uTime * 2.7 + phase * 1.7) * 0.25;
+          // Gusts travel *along* the wind: phase advances with position
+          // projected onto the wind vector, so the ripple visibly crosses
+          // the field downwind instead of shimmering in place.
+          float travel = dot(iPos.xz, uWind) * 0.09;
+          float gust = sin(uTime * 1.5 - travel + phase) * 0.55
+                     + sin(uTime * 2.7 - travel * 1.7 + phase * 1.7) * 0.25;
           // uv.y^2 keeps the root planted and lets the tip travel furthest.
-          float bend = gust * uv.y * uv.y;
-          transformed.x += bend * 0.3;
-          transformed.z += bend * 0.17;
+          // A steady lean plus the gust, both downwind.
+          float bend = (0.55 + gust * 0.45) * uWindStrength * uv.y * uv.y;
+          transformed.x += uWind.x * bend * 1.5;
+          transformed.z += uWind.y * bend * 1.5;
 
           // Distance LOD: shrink each clump into the ground as it nears the
           // draw limit. Scaling (rather than fading alpha) keeps the
@@ -355,6 +371,7 @@ function scatterGrass(scene, chunkMap) {
     // evaluations, so it goes last, after the cheap rejections have
     // already thrown most candidates out.
     if (inLake(x, z, 1.5)) continue;
+    if (rangeCorridor(x, z) > 0.5) continue; // mown lane; fringes keep their grass
 
     // Thick in the open, sparse under a closed canopy — the inverse of the
     // tree scatter, from the same density field.
@@ -424,8 +441,14 @@ function scatterGrass(scene, chunkMap) {
  * the point is that both only became possible once vegetation stopped
  * being one world-spanning mesh per species.
  */
-export function updateVegetation(dt, cameraPos) {
+export function updateVegetation(dt, cameraPos, wind) {
   grassUniforms.uTime.value += dt;
+  if (wind) {
+    grassUniforms.uWind.value.set(wind.x, wind.z);
+    // Normalised against a stiff breeze; clamped so a gale doesn't lay the
+    // field flat.
+    grassUniforms.uWindStrength.value = Math.min(1, wind.speed / 11);
+  }
   if (!cameraPos) return;
 
   for (const c of grassChunks) {

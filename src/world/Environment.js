@@ -24,8 +24,8 @@ const NIGHT_SUN_INTENSITY_CLEAR = 0.7;
 const NIGHT_SUN_INTENSITY_OVERCAST = 0.22;
 const NIGHT_HEMI_INTENSITY_CLEAR = 0.4;
 const NIGHT_HEMI_INTENSITY_OVERCAST = 0.12;
-const NIGHT_FOG_DENSITY_CLEAR = 0.009;
-const NIGHT_FOG_DENSITY_OVERCAST = 0.016;
+const NIGHT_FOG_DENSITY_CLEAR = 0.0035;
+const NIGHT_FOG_DENSITY_OVERCAST = 0.011;
 const NIGHT_SKY_CLEAR = new THREE.Color(0x1c2740);
 const NIGHT_SKY_OVERCAST = new THREE.Color(0x05070f);
 const HEMI_NIGHT_CLEAR = new THREE.Color(0x4a5c82);
@@ -195,7 +195,11 @@ export class Environment {
 
     this.scene.fog.color.copy(this.skyColor);
     const nightFogDensity = lerp(NIGHT_FOG_DENSITY_CLEAR, NIGHT_FOG_DENSITY_OVERCAST, this.cloudCover);
-    this.scene.fog.density = lerp(nightFogDensity, 0.0065, this.daylight);
+    // Thinned right down from 0.0065: FogExp2 falls off with the square of
+    // distance, so the old value left a 500m plate at ~3% visibility — the
+    // far end of the range was literally not there. At 0.0014 it's hazy but
+    // legible, which is also the more honest look for long-range shooting.
+    this.scene.fog.density = lerp(nightFogDensity, 0.0014, this.daylight);
 
     // Clouds (once they exist) hide stars and the moon, not just dim them.
     const nightVisibility = (1 - this.daylight) * (1 - this.cloudCover);

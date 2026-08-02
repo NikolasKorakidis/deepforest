@@ -18,11 +18,9 @@ import { HUD } from '../ui/HUD.js';
 import { clamp, terrainHeight, POND, POND_RADIUS } from '../world/heightfield.js';
 import { saveGame, loadGame, clearSave } from './save.js';
 import { PerfScaler } from './PerfScaler.js';
-import { ShootingRange } from '../world/ShootingRange.js';
+import { Range } from '../world/Range.js';
+import { Wind } from '../world/Wind.js';
 
-/** The range has no obstacles, so the controller gets a grid with nothing
- *  in it rather than a special case for "no collision". */
-const EMPTY_GRID = new SpatialGrid(8);
 import { allAssetsSettled, loadProgress } from './assets.js';
 
 // Orchestrator: owns the renderer/scene/camera and every game system,
@@ -46,10 +44,10 @@ export class Game {
     container.appendChild(this.renderer.domElement);
 
     this.scene = new THREE.Scene();
-    // far=420 spans the whole basin corner to corner; it was 900, which
-    // bought nothing but spent depth-buffer precision.
+    // Far enough to see the 500m plates down the range lane, with margin
+    // for the ridge behind them.
     this.camera = new THREE.PerspectiveCamera(
-      70, window.innerWidth / window.innerHeight, 0.08, 420
+      70, window.innerWidth / window.innerHeight, 0.08, 800
     );
     this.scene.add(this.camera); // required: viewmodels are camera children
 
@@ -88,7 +86,8 @@ export class Game {
       controller: this.controller,
       hud: this.hud,
       sfx: this.sfx,
-      getWorld: () => this.activeScene,
+      getWorld: () => this.scene,
+      getWind: () => this.wind,
     });
     this.campfires = new CampfireSystem(
       this.scene, this.sfx, this.interactions,
@@ -99,10 +98,8 @@ export class Game {
       inventory: this.inventory, weapon: this.weapon, stats: this.stats,
       hud: this.hud, sfx: this.sfx,
       takenPickups: new Set(this.pendingSave?.takenPickups ?? []),
-      onQuestAdvance: () => this.save(),
       firewoodSpots,
       treeSpots,
-      onWolfSighting: () => this.playWolfSighting(),
     });
 
     this.kills = 0;
@@ -114,25 +111,23 @@ export class Game {
     this.input.onPress('KeyF', () => this.eatRation());
     this.input.onPress('KeyT', () => {
       if (this.state !== 'playing') return;
-      if (this.campfires.tryBuild(this.controller, this.inventory, this.hud)) {
-        this.level.notifyCampfireBuilt();
-      }
+      this.campfires.tryBuild(this.controller, this.inventory, this.hud);
     });
     // Sleeping (and now cooking) happens through the campfire's own E-menu
     // (see openCampfireMenu) rather than a standalone key.
 
     this.stats.onDamaged = () => this.hud.damageFlash();
 
-    // The practice range is a second level with its own scene, built up
-    // front so switching to it is instant. `activeScene` is what actually
-    // gets rendered and what bullets/the rangefinder raycast against.
-    this.range = new ShootingRange({ hud: this.hud, sfx: this.sfx });
-    this.mode = 'wilderness';
-    this.activeScene = this.scene;
+    // One wind, read by the bullet solver, the grass shader and the HUD
+    // gauge alike — so what the gauge shows is literally what pushes the
+    // bullet, and a player who learns to read it is actually right.
+    this.wind = new Wind();
+    this.range = new Range({ scene: this.scene, hud: this.hud, sfx: this.sfx });
 
     // --- meta state ---
     this.state = 'loading';
     this.elapsed = 0;
+    this.saveTimer = 30;
     this.warnCooldowns = new Map();
 
     // Hold the start screen behind real asset readiness — every GLTF
@@ -162,10 +157,7 @@ export class Game {
           this.sfx.resume();
           this.input.lock();
           this.state = 'playing';
-          this.level.refreshObjective();
-          this.hud.toast('Your head pounds. The helicopter still burns behind you.', 5000);
-          setTimeout(() => this.hud.toast('No one answers your calls. Search the crash site.', 5000), 4000);
-          setTimeout(() => this.hud.toast('Then follow the valley north — into the dark.', 5000), 8500);
+          this.hud.toast('The range is west of the wreck. Watch the wind.', 6000);
         },
         onContinue: () => {
           this.sfx.resume();
@@ -184,10 +176,7 @@ export class Game {
     this.input.onLockChange((locked) => {
       if (!locked && this.state === 'playing') {
         this.state = 'paused';
-        this.hud.showPause(true, () => this.input.lock(), {
-          inRange: this.mode === 'range',
-          onToggleRange: () => this.toggleRange(),
-        });
+        this.hud.showPause(true, () => this.input.lock());
       } else if (locked && this.state === 'paused') {
         this.state = 'playing';
         this.hud.showPause(false);
@@ -213,24 +202,28 @@ export class Game {
   frame() {
     const dt = Math.min(0.05, this.clock.getDelta());
     if (this.state === 'playing') this.update(dt);
-    if (this.state === 'cutscene') this.updateCutscene(dt);
     if (this.state === 'loading') this.hud.setLoadingProgress(loadProgress());
 
-    if (this.mode === 'range') {
-      this.range.update(dt);
-    } else {
-      // Ambient animation keeps running on menus, so the start screen has a
-      // living world behind it rather than a freeze-frame.
-      this.level.update(dt, this.env, this.controller.position);
-      updateVegetation(dt, this.camera.position); // grass wind + chunk culling
-    }
+    // Ambient animation keeps running on menus, so the start screen has a
+    // living world behind it rather than a freeze-frame.
+    this.wind.update(dt);
+    this.level.update(dt, this.env, this.controller.position);
+    this.range.update(dt, this.wind);
+    updateVegetation(dt, this.camera.position, this.wind);
     this.perf.update(dt);
-    this.renderer.render(this.activeScene, this.camera);
+    this.renderer.render(this.scene, this.camera);
   }
 
   update(dt) {
     this.elapsed += dt;
-    if (this.mode === 'range') return this.updateRange(dt);
+
+    // Quest beats used to be the save trigger. With them gone, save on a
+    // timer instead — otherwise a session would never persist at all.
+    this.saveTimer -= dt;
+    if (this.saveTimer <= 0) {
+      this.saveTimer = 30;
+      this.save();
+    }
 
     this.env.update(dt, this.controller.position);
     this.controller.update(dt);
@@ -265,6 +258,7 @@ export class Game {
     this.hud.setClock(this.env.day, this.env.timeString());
     const headingDeg = ((-this.controller.yaw * 180) / Math.PI % 360 + 360) % 360;
     this.hud.setCompass(this.inventory.hasCompass ? headingDeg : null);
+    this.hud.setWind(this.wind, this.controller.yaw);
     this.hud.setColdOverlay(clamp((30 - this.stats.warmth) / 30, 0, 1));
     this.hud.setHealthPulse(this.stats.health < 25);
 
@@ -280,226 +274,7 @@ export class Game {
     else if (this.controller.position.distanceTo(this.level.checkpoint) < 5) this.finish();
   }
 
-  // ----------------------------------------------------------- range level
-  /**
-   * Swaps between the wilderness and the practice range. Both scenes stay
-   * built; what moves is the camera (the viewmodels are its children), what
-   * the controller treats as ground, and which scene renders.
-   *
-   * The survival sim is deliberately left behind: no stats drain, no
-   * wolves, no quest, no autosave. The range is a place to learn the rifle,
-   * and a run shouldn't be able to end — or advance — while you're in it.
-   */
-  toggleRange() {
-    if (this.mode === 'wilderness') {
-      this.savedWorld = {
-        pos: this.controller.position.clone(),
-        yaw: this.controller.yaw,
-        pitch: this.controller.pitch,
-        groundAt: this.controller.groundAt,
-        bounds: this.controller.bounds,
-        grid: this.controller.grid,
-        hasRifle: this.weapon.hasRifle,
-        equipped: this.weapon.equipped,
-        far: this.camera.far,
-      };
 
-      this.mode = 'range';
-      this.activeScene = this.range.scene;
-      this.range.scene.add(this.camera); // three removes it from the old parent
-
-      this.controller.groundAt = () => this.range.groundAt();
-      this.controller.bounds = this.range.bounds;
-      this.controller.grid = EMPTY_GRID;
-      this.controller.position.copy(this.range.spawn);
-      this.controller.yaw = 0;   // facing straight down the lane (-Z)
-      this.controller.pitch = 0;
-      this.controller.smoothY = 0;
-
-      // 500m targets sit well beyond the wilderness far plane.
-      this.camera.far = 900;
-      this.camera.updateProjectionMatrix();
-
-      // You can practise before you've found the rifle.
-      this.weapon.hasRifle = true;
-      this.weapon.equip('rifle');
-      this.hud.setRangeMode(true);
-      this.hud.toast('Practice range. Targets from 25m to 500m — hold the matching scope mark.', 7000);
-    } else {
-      const w = this.savedWorld;
-      this.mode = 'wilderness';
-      this.activeScene = this.scene;
-      this.scene.add(this.camera);
-
-      this.controller.groundAt = w.groundAt;
-      this.controller.bounds = w.bounds;
-      this.controller.grid = w.grid;
-      this.controller.position.copy(w.pos);
-      this.controller.yaw = w.yaw;
-      this.controller.pitch = w.pitch;
-      this.controller.smoothY = w.pos.y;
-
-      this.camera.far = w.far;
-      this.camera.updateProjectionMatrix();
-
-      this.weapon.hasRifle = w.hasRifle;
-      this.weapon.equip(w.hasRifle ? w.equipped : null);
-      this.hud.setRangeMode(false);
-      this.level.refreshObjective();
-    }
-
-    this.state = 'playing';
-    this.hud.showPause(false);
-    this.input.lock();
-  }
-
-  /** The range's cut-down loop: aim, shoot, and nothing else. */
-  updateRange(dt) {
-    this.controller.update(dt);
-    this.weapon.update(dt);
-
-    // Practice shouldn't be gated on scavenging, so the magazine never runs
-    // dry here.
-    if (this.weapon.reserveAmmo < 10) this.weapon.reserveAmmo = 60;
-
-    this.hud.setAmmo(this.weapon.magAmmo, this.weapon.reserveAmmo, this.weapon.equipped === 'rifle');
-  }
-
-  // -------------------------------------------------------------- cutscene
-  /**
-   * The one scripted beat: nearing the lake for the first time, the player
-   * raises the binoculars and finds a wolf watching from across the water.
-   *
-   * Implemented as a `state` the main loop drives rather than a timeline or
-   * a promise chain, because `state !== 'playing'` already freezes the
-   * simulation everywhere else — the player can't move, wolves can't close
-   * in, stats don't tick — which is exactly what a cutscene needs, for free.
-   */
-  /** True if nothing solid stands between two world points. */
-  hasLineOfSight(from, to) {
-    const dir = new THREE.Vector3().subVectors(to, from);
-    const dist = dir.length();
-    if (dist < 0.1) return true;
-    dir.divideScalar(dist);
-
-    if (!this._losRay) {
-      this._losRay = new THREE.Raycaster();
-      this._losRay.camera = this.camera; // Sprite.raycast throws without it
-    }
-    this._losRay.set(from, dir);
-    this._losRay.far = dist - 1.5; // stop short so the target itself isn't the blocker
-    const targets = this.scene.children.filter((o) => o !== this.camera);
-    return !this._losRay
-      .intersectObjects(targets, true)
-      .some((h) => !h.object.isSprite && !h.object.isPoints);
-  }
-
-  /**
-   * @returns true if the scene actually played. The caller keeps asking
-   *   until it does, because the whole point is that the wolf is *seen* —
-   *   firing it blind while a trunk fills the screen is worse than waiting.
-   */
-  playWolfSighting() {
-    if (this.state !== 'playing') return false;
-    const here = this.controller.position;
-    const alive = this.wolves.filter((w) => !w.dead);
-    if (alive.length === 0) return false; // nothing to look at; don't stage an empty shot
-
-    // The chosen wolf gets moved into place, so prefer one the player can't
-    // currently see — otherwise they might catch it vanishing. Falls back to
-    // the farthest, which is the least likely to be under scrutiny.
-    const eyeNow = this.camera.position;
-    const unseen = alive.filter(
-      (w) => !this.hasLineOfSight(eyeNow, new THREE.Vector3(w.pos.x, w.pos.y + 0.9, w.pos.z))
-    );
-    const pool = unseen.length > 0 ? unseen : alive;
-    const wolf = pool.sort(
-      (a, b) => b.pos.distanceToSquared(here) - a.pos.distanceToSquared(here)
-    )[0];
-
-    // Stage it on the far shore, directly across the lake on the player's
-    // own sightline. The forest is what was hiding the wolf, and the one
-    // direction guaranteed to have no forest in it is straight over open
-    // water — so rather than fight the occlusion, put the wolf where the
-    // occlusion can't be. It reads as "across the water" too, which is what
-    // the moment is meant to be.
-    const toLakeX = POND.x - here.x;
-    const toLakeZ = POND.z - here.z;
-    const len = Math.hypot(toLakeX, toLakeZ) || 1;
-    const farX = POND.x + (toLakeX / len) * (POND_RADIUS + 3);
-    const farZ = POND.z + (toLakeZ / len) * (POND_RADIUS + 3);
-    const stage = new THREE.Vector3(farX, terrainHeight(farX, farZ), farZ);
-
-    const eye = this.camera.position;
-    if (!this.hasLineOfSight(eye, new THREE.Vector3(stage.x, stage.y + 0.9, stage.z))) {
-      return false; // still screened by trees or a rise — try again shortly
-    }
-
-    wolf.pos.copy(stage);
-    wolf.group.position.copy(stage);
-
-    this.state = 'cutscene';
-    this.cutscene = {
-      t: 0,
-      target: stage.clone(),
-      prevEquipped: this.weapon.equipped,
-    };
-    if (this.inventory.hasBinoculars) {
-      this.weapon.equip('binoculars');
-      this.weapon.aiming = true; // drives the FOV zoom and the lens mask
-    }
-    this.hud.setPrompt(null);
-    this.hud.toast('You raise the binoculars.', 3000);
-    return true;
-  }
-
-  updateCutscene(dt) {
-    const c = this.cutscene;
-    c.t += dt;
-
-    // Pointer lock stays on through the cutscene, so the mouse keeps
-    // accumulating deltas that nothing is reading (PlayerController.update
-    // is the only consumer and the sim is frozen). Drain and discard them,
-    // or every bit of mouse movement made during the scene is applied in
-    // one jolt the instant control comes back.
-    this.input.consumeMouseDelta();
-
-    // Turn to face the wolf. Writing the controller's own yaw/pitch (rather
-    // than the camera's rotation directly) means that when control comes
-    // back the player is simply looking where the camera ended up, with no
-    // snap.
-    const cam = this.camera;
-    const dx = c.target.x - cam.position.x;
-    const dz = c.target.z - cam.position.z;
-    const dy = (c.target.y + 0.7) - cam.position.y;
-    const wantYaw = Math.atan2(-dx, -dz);
-    const wantPitch = Math.atan2(dy, Math.hypot(dx, dz));
-
-    let dyaw = wantYaw - this.controller.yaw;
-    while (dyaw > Math.PI) dyaw -= Math.PI * 2;
-    while (dyaw < -Math.PI) dyaw += Math.PI * 2;
-
-    const k = Math.min(1, dt * 2.6);
-    this.controller.yaw += dyaw * k;
-    this.controller.pitch += (wantPitch - this.controller.pitch) * k;
-    cam.rotation.set(this.controller.pitch, this.controller.yaw, 0);
-
-    // Keeps the FOV zoom and binocular mask animating — Weapon.update is
-    // what owns both, and it's safe to run with the sim otherwise frozen.
-    this.weapon.update(dt);
-
-    if (c.t > 1.6 && !c.spoke) {
-      c.spoke = true;
-      this.hud.toast("A wolf, across the water. It hasn't moved.", 4500);
-    }
-
-    if (c.t > 5) {
-      this.weapon.aiming = false;
-      this.weapon.equip(c.prevEquipped);
-      this.cutscene = null;
-      this.state = 'playing';
-    }
-  }
 
   warn(key, condition, message, cooldownSec = 45) {
     if (!condition) return;
@@ -529,9 +304,7 @@ export class Game {
   async openCampfireMenu(fire) {
     if (this.state !== 'playing') return;
     const canCook = this.inventory.rations > 0;
-    // Normally you can only sleep once it's dim, but not when the quest is
-    // actively asking for it — see Level.questWantsSleep.
-    const canSleep = this.env.daylight <= 0.5 || this.level.questWantsSleep;
+    const canSleep = this.env.daylight <= 0.5;
 
     this.state = 'menu';
     document.exitPointerLock();
@@ -558,7 +331,7 @@ export class Game {
   }
 
   async sleepAtFire(fire) {
-    if (this.env.daylight > 0.5 && !this.level.questWantsSleep) {
+    if (this.env.daylight > 0.5) {
       this.hud.toast('It is too bright to sleep. Wait for evening.');
       return;
     }
@@ -571,7 +344,6 @@ export class Game {
     await this.hud.fade(false);
     this.state = 'playing';
     this.hud.toast('You wake at first light, stiff and cold — but rested.');
-    this.level.notifySlept();
   }
 
   gameOver() {
@@ -601,12 +373,12 @@ export class Game {
    *  everything needed to resume roughly where the player left off. */
   save() {
     saveGame({
-      questStage: this.level.questStage,
       takenPickups: [...this.level.takenPickups],
       day: this.env.day,
       time: this.env.time,
       elapsed: this.elapsed,
       kills: this.kills,
+      score: this.range.score,
       player: {
         x: this.controller.position.x,
         y: this.controller.position.y,
@@ -657,11 +429,8 @@ export class Game {
 
     this.elapsed = data.elapsed;
     this.kills = data.kills;
+    if (data.score) { this.range.score = data.score; this.hud.setScore(data.score, 0); }
 
-    this.level.questStage = data.questStage;
-    // Rebuilds the line from live state, so restored counters ("2/4",
-    // "1/3 wood") are correct rather than frozen at whatever they were.
-    this.level.refreshObjective();
 
     for (const f of data.campfires) this.campfires.rebuild(f.x, f.z, f.fuel, this.hud);
   }

@@ -47,13 +47,14 @@ const HIP_POS = new THREE.Vector3(-0.075, -0.21, -0.055);
 const AIM_POS = new THREE.Vector3(0.055, -0.26, -0.025);
 
 export class Weapon {
-  constructor({ camera, input, controller, hud, sfx, getWorld }) {
+  constructor({ camera, input, controller, hud, sfx, getWorld, getWind }) {
     this.camera = camera;
     this.input = input;
     this.controller = controller;
     this.hud = hud;
     this.sfx = sfx;
     this.getWorld = getWorld;
+    this.getWind = getWind; // shared Wind instance; see _updateBullets
 
     this.equipped = null; // 'rifle' | 'binoculars' | null
     this.hasRifle = false;
@@ -279,9 +280,19 @@ export class Weapon {
       // low at 30fps on a 100m shot: the same hold landing differently on
       // a slower machine.)
       const g = CONFIG.rifle.bulletGravity;
+      // Wind is a horizontal acceleration, integrated with the same
+      // closed form as gravity so drift is framerate-independent too.
+      const w = this.getWind?.();
+      const ax = w ? w.x * w.speed * CONFIG.rifle.windDrift : 0;
+      const az = w ? w.z * w.speed * CONFIG.rifle.windDrift : 0;
+
       b.pos.addScaledVector(b.vel, dt);
+      b.pos.x += 0.5 * ax * dt * dt;
       b.pos.y -= 0.5 * g * dt * dt;
+      b.pos.z += 0.5 * az * dt * dt;
+      b.vel.x += ax * dt;
       b.vel.y -= g * dt;
+      b.vel.z += az * dt;
 
       const segment = new THREE.Vector3().subVectors(b.pos, prevPos);
       const dist = segment.length();
