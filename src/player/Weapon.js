@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
 import { CONFIG } from '../core/config.js';
 import { makeGlowSprite } from '../core/glow.js';
-import { makeSparkSprite } from '../core/particleTextures.js';
+import { makeSparkSprite, makeSmokeSprite } from '../core/particleTextures.js';
 import { loadGLTF, normalizeModel } from '../core/assets.js';
 import fpsHandsUrl from '../assets/models/fps_hands.glb?url';
 import binocularsUrl from '../assets/models/binoculars.glb?url';
@@ -331,15 +331,52 @@ export class Weapon {
     }
   }
 
-  /** A brief burst of sparks where a shot lands — terrain or a wolf alike. */
+  /**
+   * Where a shot lands: a dust plume plus a spray of debris.
+   *
+   * This is the single most important piece of feedback in a shooting game
+   * — a miss you can't see teaches you nothing, and at 400m the old
+   * fist-sized spark burst was a couple of pixels, so every miss looked
+   * identical to every other. The effect is therefore scaled by distance
+   * from the camera, which keeps its *angular* size roughly constant: a
+   * strike beside the 500m plate reads as clearly as one at your feet, and
+   * you can see whether you went left, right, high or low and correct.
+   */
   _spawnImpact(point) {
+    const dist = this.camera.position.distanceTo(point);
+    // Sub-linear (^0.65) rather than full angular compensation. Scaling
+    // linearly with distance holds apparent size exactly constant, but a
+    // 500m strike then throws a 6m plume — wider than the 3.5m plate beside
+    // it, which looks ridiculous and hides the very thing you're checking.
+    // This keeps a miss clearly readable at every range while staying
+    // smaller than the target it's next to.
+    const scale = Math.pow(Math.max(1, dist / 40), 0.65);
+
     const sprites = [];
-    const n = 6 + Math.floor(Math.random() * 3);
-    for (let i = 0; i < n; i++) {
-      const s = makeSparkSprite(0.09 + Math.random() * 0.06, 1);
+
+    // Dust plume — the part actually visible at range.
+    const puffs = 3;
+    for (let i = 0; i < puffs; i++) {
+      const s = makeSmokeSprite(0xb9a888, 0.5 * scale, 0.75);
       s.position.copy(point);
       const theta = Math.random() * Math.PI * 2;
-      const speed = 1 + Math.random() * 2.5;
+      s.userData.vel = new THREE.Vector3(
+        Math.cos(theta) * (0.4 + Math.random() * 0.7) * scale,
+        (1.1 + Math.random() * 0.9) * scale,
+        Math.sin(theta) * (0.4 + Math.random() * 0.7) * scale
+      );
+      s.userData.grow = (1.6 + Math.random()) * scale;
+      this.getWorld().add(s);
+      sprites.push(s);
+    }
+
+    // Debris sparks, mostly for the close-range punch.
+    const n = 6 + Math.floor(Math.random() * 3);
+    for (let i = 0; i < n; i++) {
+      const s = makeSparkSprite((0.09 + Math.random() * 0.06) * scale, 1);
+      s.position.copy(point);
+      const theta = Math.random() * Math.PI * 2;
+      const speed = (1 + Math.random() * 2.5) * scale;
       s.userData.vel = new THREE.Vector3(
         Math.cos(theta) * speed,
         (0.6 + Math.random() * 0.8) * speed,
@@ -348,7 +385,10 @@ export class Weapon {
       this.getWorld().add(s);
       sprites.push(s);
     }
-    this.impacts.push({ sprites, age: 0, life: 0.35 });
+
+    // Long enough to be spotted after the shot settles, since at distance
+    // you're often still recovering from recoil when the round lands.
+    this.impacts.push({ sprites, age: 0, life: 1.1 });
   }
 
   _updateImpacts(dt) {
@@ -357,9 +397,18 @@ export class Weapon {
       imp.age += dt;
       const fade = Math.max(0, 1 - imp.age / imp.life);
       for (const s of imp.sprites) {
-        s.userData.vel.y -= 9.8 * dt;
+        // Dust billows and hangs; debris is heavier and falls away.
+        const grow = s.userData.grow;
+        s.userData.vel.y -= (grow ? 2.4 : 11) * dt;
+        s.userData.vel.multiplyScalar(grow ? 1 - 1.7 * dt : 1);
         s.position.addScaledVector(s.userData.vel, dt);
-        s.material.opacity = fade;
+        if (grow) {
+          const sz = s.scale.x + grow * dt;
+          s.scale.set(sz, sz, 1);
+          s.material.opacity = fade * 0.6;
+        } else {
+          s.material.opacity = fade;
+        }
       }
       if (imp.age >= imp.life) {
         for (const s of imp.sprites) this.getWorld().remove(s);

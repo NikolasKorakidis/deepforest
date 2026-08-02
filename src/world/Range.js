@@ -53,7 +53,10 @@ class Target {
     // Pop-up cycle. Staggered start delays so they don't rise in unison.
     this.up = false;
     this.timer = 1 + Math.random() * 6;
-    this.hidden = 0; // seconds it stays down
+    // Once hit, a plate is done — it drops and never comes back up. Each
+    // target is a single scoring opportunity, so a run is about clearing
+    // the range rather than farming the easy 25m plate.
+    this.knocked = false;
 
     const size = plateSize(dist);
     this.size = size;
@@ -131,13 +134,18 @@ class Target {
   }
 
   hit() {
-    if (!this.up) return; // edge-on and already down; nothing to hit
+    if (!this.up || this.knocked) return; // edge-on, or already knocked down
     this.up = false;
-    this.timer = 2 + Math.random() * 4;
+    this.knocked = true;
     if (this.onHit) this.onHit(this);
   }
 
   update(dt) {
+    if (this.knocked) {
+      // Settle flat and stay there.
+      this.pivot.rotation.x += (-Math.PI / 2 - this.pivot.rotation.x) * Math.min(1, dt * 9);
+      return;
+    }
     this.timer -= dt;
     if (this.timer <= 0) {
       this.up = !this.up;
@@ -242,6 +250,28 @@ export class Range {
     });
   }
 
+  get remaining() {
+    return this.targets.filter((t) => !t.knocked).length;
+  }
+
+  /** Which plates are already down, for the save. Without this the score
+   *  would persist across a reload while the targets stood back up, so the
+   *  same plates could be scored again and again. */
+  get knockedDistances() {
+    return this.targets.filter((t) => t.knocked).map((t) => t.dist);
+  }
+
+  restore(distances = []) {
+    const down = new Set(distances);
+    for (const t of this.targets) {
+      if (!down.has(t.dist)) continue;
+      t.knocked = true;
+      t.up = false;
+      t.pivot.rotation.x = -Math.PI / 2;
+    }
+    this.hits = distances.length;
+  }
+
   _registerHit(target) {
     // Chained hits build a multiplier; let it lapse and you start over.
     this.streak = this.streakTimer > 0 ? Math.min(5, this.streak + 1) : 1;
@@ -256,6 +286,10 @@ export class Range {
       1500
     );
     this.hud.setScore(this.score, this.streak);
+
+    if (this.remaining === 0) {
+      this.hud.toast(`Range cleared — ${this.score} points, ${this.hits} plates.`, 9000);
+    }
   }
 
   update(dt, wind) {

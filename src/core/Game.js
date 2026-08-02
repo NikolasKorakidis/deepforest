@@ -379,6 +379,7 @@ export class Game {
       elapsed: this.elapsed,
       kills: this.kills,
       score: this.range.score,
+      rangeKnocked: this.range.knockedDistances,
       player: {
         x: this.controller.position.x,
         y: this.controller.position.y,
@@ -430,6 +431,7 @@ export class Game {
     this.elapsed = data.elapsed;
     this.kills = data.kills;
     if (data.score) { this.range.score = data.score; this.hud.setScore(data.score, 0); }
+    this.range.restore(data.rangeKnocked ?? []);
 
 
     for (const f of data.campfires) this.campfires.rebuild(f.x, f.z, f.fuel, this.hud);

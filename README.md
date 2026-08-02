@@ -61,8 +61,10 @@ not part of the running game — see the tree/lake design note below.
    across the lane so no two share a sightline. Three of them (150m, 300m,
    500m) stand on rises, which varies the shot and lifts those plates clear
    of the ground behind them. Plates rise, wait, and drop again, so there's
-   a reason to stay on the glass and a reason to hurry. It's daylight when
-   you start.
+   a reason to stay on the glass and a reason to hurry — but a plate you
+   *hit* drops for good, so each is a single scoring opportunity and a run
+   is about clearing the range rather than farming the easy 25m plate. It's
+   daylight when you start.
 2. **Range it, then hold** — RMB scopes in; the rangefinder reads the
    distance to whatever is centred. Hold the matching BDC mark (mark 3 at
    300m, half-step ticks for 150m and 250m) and the shot lands on the plate.
@@ -74,7 +76,8 @@ not part of the running game — see the tree/lake design note below.
    ignoring it is a clean miss.
 4. **Score** — each plate is worth `10 + distance/10`, so the 500m plate pays
    about five times the 25m one. Chained hits build a multiplier up to x5;
-   let six seconds lapse without a hit and it resets.
+   let six seconds lapse without a hit and it resets. Watch where your
+   misses kick up dust — that's how you learn the hold.
 5. **The wilderness is still there** — gather wood (E at any tree), build a
    fire (T), cook and sleep at it, drink at the lake. Six wolves hold the
    water and the ridge above it; a headshot drops one instantly, a body shot
@@ -235,6 +238,17 @@ Design notes:
   lane floor rolls gently and carries a few mounds rather than being a
   runway; the mound profile is a cosine falloff so it meets the surrounding
   floor with zero gradient instead of a crease.
+- Impact dust is scaled by distance from the camera, because a miss you
+  can't see teaches you nothing — at 400m the original fist-sized spark
+  burst was a couple of pixels, so every miss looked identical. Scaling is
+  sub-linear (`^0.65`) rather than exact angular compensation: holding
+  apparent size perfectly constant would throw a 6m plume beside a 3.5m
+  plate, hiding the very thing you're checking. As tuned, a strike reads at
+  12–43px through the scope at any range while always staying smaller than
+  the plate next to it.
+- Knocked-down plates are saved along with the score. They're two halves of
+  one fact, and persisting only the score would have let a reload stand the
+  targets back up and re-score the same plates.
 - Target visibility is a light face inside a dark backing board, not just a
   pale plate — a pale plate against a pale hillside disappears, whereas the
   border silhouettes against any background. Both face and bullseye carry a
