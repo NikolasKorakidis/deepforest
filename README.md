@@ -74,9 +74,11 @@ not part of the running game — see the tree/lake design note below.
    means it will carry the bullet right. The windsocks down the lane say the
    same thing in the world. Under 200m wind is negligible; at 400m and 500m
    ignoring it is a clean miss.
-4. **Kill cam** — land a headshot on a wolf, or a plate dead centre, from
-   40m or further, and the world drops into slow motion while the camera
-   pulls off your shoulder and chases the round in to the target.
+4. **Kill cam** — the world drops into slow motion and the camera pulls off
+   your shoulder to chase the round in. A wolf headshot or a dead-centre
+   plate always earns one; any other shot that hits *something* has a 20%
+   chance of it (`CONFIG.killcam.chance`). Shots into open sky never
+   qualify — there'd be nothing to watch.
 5. **Score** — each plate is worth `10 + distance/10`, so the 500m plate pays
    about five times the 25m one. Dead centre doubles it. Chained hits build a multiplier up to x5;
    let six seconds lapse without a hit and it resets. Watch where your

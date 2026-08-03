@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { makeGlowSprite } from './glow.js';
+import { CONFIG } from './config.js';
 
 // Slow-motion third-person bullet cam, in the spirit of Sniper Elite's
 // killcam: earn a headshot or a dead-centre plate hit and the world drops
@@ -15,9 +16,6 @@ import { makeGlowSprite } from './glow.js';
 // shot was 60m or 500m. Without that split a close headshot would be over
 // before it registered, and a long one would overstay badly.
 
-const FLIGHT_SECONDS = 2.4;   // real seconds the flight should take
-const IMPACT_HOLD = 1.15;     // real seconds to linger after the hit
-const MIN_DISTANCE = 40;      // below this there's no flight worth watching
 
 export class KillCam {
   constructor({ camera, scene, hud, onChange }) {
@@ -45,7 +43,7 @@ export class KillCam {
   /** @returns true if the sequence actually started. */
   start({ bullet, point, kind, flightTime }, shooterPos) {
     if (this.active) return false;
-    if (shooterPos.distanceTo(point) < MIN_DISTANCE) return false;
+    if (shooterPos.distanceTo(point) < CONFIG.killcam.minDistance) return false;
 
     this.bullet = bullet;
     this.impact = point.clone();
@@ -55,7 +53,7 @@ export class KillCam {
 
     // Scale time so the remaining flight fills FLIGHT_SECONDS regardless of
     // range, clamped so it never becomes a crawl or a blink.
-    this.timeScale = THREE.MathUtils.clamp(flightTime / FLIGHT_SECONDS, 0.04, 0.35);
+    this.timeScale = THREE.MathUtils.clamp(flightTime / CONFIG.killcam.flightSeconds, 0.04, 0.35);
     this.active = true;
 
     // A scoped 26° view makes a claustrophobic cinematic; widen out and
@@ -87,10 +85,17 @@ export class KillCam {
       // and grows, while the round streaks in toward it.
       this._dir.copy(b.vel).normalize();
       this._right.crossVectors(this._dir, this._up).normalize();
+
+      // The offset drifts slowly around the flight axis. Held rigid, a long
+      // shot is two seconds of the camera staring at a distant speck with
+      // nothing moving but the ground; rotating it keeps parallax alive so
+      // you can feel the round travelling.
+      this.orbit += realDt * 0.7;
+      const swing = Math.cos(this.orbit);
       this._desired.copy(b.pos)
         .addScaledVector(this._dir, -3.4)
-        .addScaledVector(this._right, 2.3)
-        .addScaledVector(this._up, 1.15);
+        .addScaledVector(this._right, 2.3 * swing)
+        .addScaledVector(this._up, 1.15 + 0.75 * Math.sin(this.orbit));
 
       cam.position.lerp(this._desired, Math.min(1, realDt * 7));
       cam.lookAt(this.impact);
@@ -117,7 +122,7 @@ export class KillCam {
     cam.position.lerp(this._desired, Math.min(1, realDt * 3.2));
     cam.lookAt(this.impact);
 
-    if (this.holdT >= IMPACT_HOLD) this.stop();
+    if (this.holdT >= CONFIG.killcam.impactHold) this.stop();
   }
 
   stop() {

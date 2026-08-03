@@ -111,6 +111,22 @@ export const CONFIG = {
     },
   },
 
+  // Slow-motion third-person bullet cam (see core/KillCam.js).
+  killcam: {
+    // An ordinary hit has this chance of earning the camera, so it stays a
+    // treat rather than something that interrupts every shot. Shots that
+    // sail into open sky never qualify — there'd be nothing to watch.
+    chance: 0.2,
+    // A wolf headshot or a dead-centre plate always triggers it regardless
+    // of the roll: those are the shots the camera exists to celebrate, and
+    // leaving them to chance would mean the best shot you land all session
+    // might pass unremarked. Set false to put everything on the roll.
+    alwaysOnSpecial: true,
+    minDistance: 15,   // closer than this there's no flight worth watching
+    flightSeconds: 2.4, // real seconds the slowed flight should fill
+    impactHold: 1.15,   // real seconds to linger on the strike
+  },
+
   fire: {
     woodCost: 3,
     burnTimeSec: 300,       // one fire covers roughly one night

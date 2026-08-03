@@ -260,10 +260,13 @@ export class HUD {
    *  HUD is hidden meanwhile — stat bars over a cinematic look wrong, and
    *  the crosshair is meaningless when the camera isn't yours. */
   setKillcam(kind) {
+    // null ends it; '' runs the cinematic with no caption (an ordinary shot
+    // that won the roll has nothing to boast about).
+    const on = kind !== null && kind !== undefined;
     const el = this.el('killcam');
-    el.classList.toggle('active', !!kind);
-    document.getElementById('hud').classList.toggle('cinematic', !!kind);
-    if (kind) this.el('killcam-label').textContent = kind;
+    el.classList.toggle('active', on);
+    document.getElementById('hud').classList.toggle('cinematic', on);
+    if (on) this.el('killcam-label').textContent = kind;
   }
 
   // ---------------------------------------------------------------- score
