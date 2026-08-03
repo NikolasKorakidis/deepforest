@@ -231,6 +231,7 @@ export class Weapon {
   }
 
   tryFire() {
+    if (this.cinematic) return; // spectating your own shot; the trigger is dead
     if (this.equipped !== 'rifle' || this.reloadT > 0 || this.cooldown > 0) return;
     if (this.magAmmo <= 0) {
       this.sfx.dry();
@@ -257,11 +258,91 @@ export class Weapon {
     this.camera.getWorldDirection(dir);
     const muzzlePos = new THREE.Vector3();
     this.camera.getWorldPosition(muzzlePos);
-    this.bullets.push({
+    const bullet = {
       pos: muzzlePos,
       vel: dir.multiplyScalar(CONFIG.rifle.muzzleVelocity),
       life: CONFIG.rifle.bulletLifetime,
-    });
+      resolved: false,
+    };
+    this.bullets.push(bullet);
+
+    // Decide *now* whether this shot deserves the slow-motion camera. It has
+    // to be now rather than on impact, because the whole point is to watch
+    // the flight — by the time the round lands there's nothing left to show.
+    // That's what Sniper Elite does too: the shot is evaluated at the
+    // trigger, and the camera commits before anyone knows for certain.
+    if (this.onSpecialShot) {
+      const shot = this._predictShot(muzzlePos, bullet.vel);
+      if (shot) this.onSpecialShot({ ...shot, bullet });
+    }
+  }
+
+  /**
+   * Flies a throwaway copy of the shot to find what it will hit and where.
+   *
+   * Deliberately coarse — 1/25s steps, ~32m of travel each. That sounds
+   * reckless for deciding a bullseye, but each step is a *swept* raycast
+   * along the chord, and the only error is the arc's sag away from that
+   * chord: g·dt²/8 ≈ 2.3cm, against a bullseye radius of 15cm at 25m and
+   * 46cm at 500m. Well inside. Stepping finely instead would multiply the
+   * scene raycasts (the expensive part) by five for no decision it would
+   * change, and this runs on the firing frame where a hitch is felt.
+   */
+  _predictShot(startPos, startVel) {
+    const pos = startPos.clone();
+    const vel = startVel.clone();
+    const g = CONFIG.rifle.bulletGravity;
+    const w = this.getWind?.();
+    const ax = w ? w.x * w.speed * CONFIG.rifle.windDrift : 0;
+    const az = w ? w.z * w.speed * CONFIG.rifle.windDrift : 0;
+
+    const world = this.getWorld().children.filter((o) => o !== this.camera);
+    const step = 1 / 25;
+    const prev = new THREE.Vector3();
+    const seg = new THREE.Vector3();
+    let travelled = 0;
+    let t = 0;
+
+    // Bounded by distance rather than lifetime: a shot into empty sky would
+    // otherwise raycast the scene a hundred times for nothing.
+    while (travelled < 620) {
+      prev.copy(pos);
+      pos.addScaledVector(vel, step);
+      pos.x += 0.5 * ax * step * step;
+      pos.y -= 0.5 * g * step * step;
+      pos.z += 0.5 * az * step * step;
+      vel.x += ax * step;
+      vel.y -= g * step;
+      vel.z += az * step;
+      t += step;
+
+      seg.subVectors(pos, prev);
+      const d = seg.length();
+      if (d < 1e-6) continue;
+      travelled += d;
+      seg.divideScalar(d);
+
+      this.bulletRaycaster.set(prev, seg);
+      this.bulletRaycaster.far = d;
+      const hit = firstSolidHit(this.bulletRaycaster.intersectObjects(world, true));
+      if (!hit) continue;
+
+      let obj = hit.object;
+      while (obj && !obj.userData.wolfRef && !obj.userData.rangeTarget) obj = obj.parent;
+      if (!obj) return null; // hit terrain or scenery — nothing to celebrate
+
+      const point = hit.point.clone();
+      const wolf = obj.userData.wolfRef;
+      if (wolf && !wolf.dead && wolf.isHeadshot(point)) {
+        return { kind: 'HEADSHOT', point, flightTime: t };
+      }
+      const target = obj.userData.rangeTarget;
+      if (target && target.up && !target.knocked && target.isBullseye(point)) {
+        return { kind: 'BULLSEYE', point, flightTime: t };
+      }
+      return null; // a hit, but an ordinary one
+    }
+    return null;
   }
 
   /** Advances in-flight bullets: gravity + a swept raycast per step so fast
@@ -324,8 +405,16 @@ export class Weapon {
           this.hud.hitmarker();
         }
         this._spawnImpact(hit.point);
+        // Flagged before removal: the kill cam holds a reference to this
+        // bullet and watches it to know when the flight is over.
+        b.impact = hit.point.clone();
+        b.resolved = true;
         this.bullets.splice(i, 1);
       } else if (b.life <= 0) {
+        // Expired without hitting anything — still "resolved", or a kill cam
+        // following a shot that sails into the sky would never end.
+        b.impact = b.pos.clone();
+        b.resolved = true;
         this.bullets.splice(i, 1);
       }
     }
@@ -458,6 +547,21 @@ export class Weapon {
         this.magAmmo += take;
         this.reserveAmmo -= take;
       }
+    }
+
+    // While the kill cam has the camera, the player's own view furniture has
+    // to go: viewmodels would hang in mid-air in third person, and the scope
+    // overlay would frame a camera that isn't looking down the scope.
+    if (this.cinematic) {
+      this.rifleGroup.visible = false;
+      this.binocGroup.visible = false;
+      this.flash.visible = false;
+      this.flashLight.intensity = 0;
+      this.hud.setScopeView(false, null);
+      this.hud.setCrosshair(false);
+      this.hud.setBinocularMask(false);
+      if (this.mixer) this.mixer.update(dt);
+      return;
     }
 
     // FOV zoom for aiming / binoculars.

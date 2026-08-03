@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import { terrainHeight, RANGE, rangeTargetSpots } from './heightfield.js';
 
+const _v = new THREE.Vector3(); // scratch, reused by centre()/isBullseye()
+
 // The shooting range, built into the wilderness scene rather than a level
 // of its own: a cleared lane north-west of the crash site (carved by
 // heightfield.rangeCorridor) with pop-up steel from 25m to 500m.
@@ -119,8 +121,12 @@ class Target {
     this.pivot.add(dot);
 
     // Only the plate is shootable — the posts aren't, so a hit is a hit on
-    // the target proper rather than on its furniture.
-    for (const m of [this.plate, ring, dot, board]) m.userData.onShot = () => this.hit();
+    // the target proper rather than on its furniture. `rangeTarget` lets the
+    // shot predictor ask about a candidate hit before the bullet gets there.
+    for (const m of [this.plate, ring, dot, board]) {
+      m.userData.onShot = (point) => this.hit(point);
+      m.userData.rangeTarget = this;
+    }
 
     const labelH = Math.max(1.1, dist * 0.012);
     const label = new THREE.Mesh(
@@ -133,8 +139,20 @@ class Target {
     this.onHit = null;
   }
 
-  hit() {
+  /** World-space centre of the plate face — the bullseye. */
+  centre(out = new THREE.Vector3()) {
+    return this.plate.getWorldPosition(out);
+  }
+
+  /** Dead centre, within the black dot. Used both for scoring flourish and
+   *  to decide whether a shot earns the slow-motion camera. */
+  isBullseye(point) {
+    return point.distanceTo(this.centre(_v)) < this.size * 0.13;
+  }
+
+  hit(point) {
     if (!this.up || this.knocked) return; // edge-on, or already knocked down
+    this.bullseye = point ? this.isBullseye(point) : false;
     this.up = false;
     this.knocked = true;
     if (this.onHit) this.onHit(this);
@@ -277,12 +295,16 @@ export class Range {
     this.streak = this.streakTimer > 0 ? Math.min(5, this.streak + 1) : 1;
     this.streakTimer = 6;
 
-    const gained = target.points * this.streak;
+    // Dead centre pays double — the same shot the kill cam rewards.
+    const bull = target.bullseye ? 2 : 1;
+    const gained = target.points * this.streak * bull;
     this.score += gained;
     this.hits++;
     this.sfx.ding();
     this.hud.toast(
-      `${target.dist}m  +${gained}${this.streak > 1 ? `  x${this.streak}` : ''}`,
+      `${target.dist}m  +${gained}`
+        + `${this.streak > 1 ? `  x${this.streak}` : ''}`
+        + `${target.bullseye ? '  BULLSEYE' : ''}`,
       1500
     );
     this.hud.setScore(this.score, this.streak);

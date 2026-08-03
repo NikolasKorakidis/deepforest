@@ -20,6 +20,7 @@ import { saveGame, loadGame, clearSave } from './save.js';
 import { PerfScaler } from './PerfScaler.js';
 import { Range } from '../world/Range.js';
 import { Wind } from '../world/Wind.js';
+import { KillCam } from './KillCam.js';
 
 import { allAssetsSettled, loadProgress } from './assets.js';
 
@@ -124,6 +125,18 @@ export class Game {
     this.wind = new Wind();
     this.range = new Range({ scene: this.scene, hud: this.hud, sfx: this.sfx });
 
+    this.killcam = new KillCam({
+      camera: this.camera, scene: this.scene, hud: this.hud,
+      // Weapon hides its own viewmodels and scope overlay while the camera
+      // isn't the player's — pushed rather than polled so there's no frame
+      // where the rifle hangs in mid-air in third person.
+      onChange: (active) => { this.weapon.cinematic = active; },
+    });
+    this.weapon.onSpecialShot = (shot) => {
+      if (this.state !== 'playing') return;
+      this.killcam.start(shot, this.controller.position);
+    };
+
     // --- meta state ---
     this.state = 'loading';
     this.elapsed = 0;
@@ -175,6 +188,10 @@ export class Game {
 
     this.input.onLockChange((locked) => {
       if (!locked && this.state === 'playing') {
+        // Pausing cancels the cinematic. Otherwise the world stops while the
+        // kill cam waits on a bullet that can no longer move, and it hangs
+        // letterboxed forever.
+        this.killcam.stop();
         this.state = 'paused';
         this.hud.showPause(true, () => this.input.lock());
       } else if (locked && this.state === 'paused') {
@@ -200,7 +217,10 @@ export class Game {
   }
 
   frame() {
-    const dt = Math.min(0.05, this.clock.getDelta());
+    // Real elapsed time drives the kill cam's own choreography; everything
+    // in the world runs on the scaled clock, which is what slow motion is.
+    const real = Math.min(0.05, this.clock.getDelta());
+    const dt = real * this.killcam.timeScale;
     if (this.state === 'playing') this.update(dt);
     if (this.state === 'loading') this.hud.setLoadingProgress(loadProgress());
 
@@ -210,7 +230,9 @@ export class Game {
     this.level.update(dt, this.env, this.controller.position);
     this.range.update(dt, this.wind);
     updateVegetation(dt, this.camera.position, this.wind);
-    this.perf.update(dt);
+    // After every other camera write, so nothing fights it for control.
+    this.killcam.update(real);
+    this.perf.update(real);
     this.renderer.render(this.scene, this.camera);
   }
 
@@ -225,6 +247,18 @@ export class Game {
       this.save();
     }
 
+    // During the kill cam the player is a spectator: the round and the world
+    // keep moving (slowly), but nothing that would let them act or come to
+    // harm while they can't see their own view.
+    if (this.killcam.active) {
+      this.input.consumeMouseDelta(); // or a scene's worth of look lands in one jolt
+      this.weapon.update(dt);
+      // Wolves keep running so the ragdoll a headshot causes actually plays
+      // out in slow motion — that hit is the whole reason for the camera.
+      for (const w of this.wolves) w.update(dt, this.wolfCtx());
+      return;
+    }
+
     this.env.update(dt, this.controller.position);
     this.controller.update(dt);
     this.weapon.update(dt);
@@ -236,18 +270,8 @@ export class Game {
       altitude: this.controller.position.y,
     });
 
-    const stealthMult = this.controller.stance === 'prone' ? CONFIG.wolf.proneDetectMult
-      : this.controller.stance === 'crouch' ? CONFIG.wolf.crouchDetectMult
-      : 1;
-    const wolfCtx = {
-      playerPos: this.controller.position,
-      stats: this.stats,
-      env: this.env,
-      sfx: this.sfx,
-      hud: this.hud,
-      stealthMult,
-    };
-    for (const w of this.wolves) w.update(dt, wolfCtx);
+    const ctx = this.wolfCtx();
+    for (const w of this.wolves) w.update(dt, ctx);
 
     this.interactions.update(this.controller.position);
 
@@ -275,6 +299,21 @@ export class Game {
   }
 
 
+
+  /** Shared context handed to every wolf each frame. */
+  wolfCtx() {
+    const stealthMult = this.controller.stance === 'prone' ? CONFIG.wolf.proneDetectMult
+      : this.controller.stance === 'crouch' ? CONFIG.wolf.crouchDetectMult
+      : 1;
+    return {
+      playerPos: this.controller.position,
+      stats: this.stats,
+      env: this.env,
+      sfx: this.sfx,
+      hud: this.hud,
+      stealthMult,
+    };
+  }
 
   warn(key, condition, message, cooldownSec = 45) {
     if (!condition) return;

@@ -74,11 +74,14 @@ not part of the running game — see the tree/lake design note below.
    means it will carry the bullet right. The windsocks down the lane say the
    same thing in the world. Under 200m wind is negligible; at 400m and 500m
    ignoring it is a clean miss.
-4. **Score** — each plate is worth `10 + distance/10`, so the 500m plate pays
-   about five times the 25m one. Chained hits build a multiplier up to x5;
+4. **Kill cam** — land a headshot on a wolf, or a plate dead centre, from
+   40m or further, and the world drops into slow motion while the camera
+   pulls off your shoulder and chases the round in to the target.
+5. **Score** — each plate is worth `10 + distance/10`, so the 500m plate pays
+   about five times the 25m one. Dead centre doubles it. Chained hits build a multiplier up to x5;
    let six seconds lapse without a hit and it resets. Watch where your
    misses kick up dust — that's how you learn the hold.
-5. **The wilderness is still there** — gather wood (E at any tree), build a
+6. **The wilderness is still there** — gather wood (E at any tree), build a
    fire (T), cook and sleep at it, drink at the lake. Six wolves hold the
    water and the ridge above it; a headshot drops one instantly, a body shot
    wounds and slows it.
@@ -238,6 +241,24 @@ Design notes:
   lane floor rolls gently and carries a few mounds rather than being a
   runway; the mound profile is a cosine falloff so it meets the surrounding
   floor with zero gradient instead of a crease.
+- The kill cam decides at the *trigger*, not on impact — by the time a round
+  lands there's no flight left to show — so firing runs a throwaway copy of
+  the shot forward to see what it will hit (`Weapon._predictShot`). That
+  prediction is deliberately coarse: 1/25s steps, ~32m of travel each. It
+  sounds reckless for judging a bullseye, but every step is a *swept* raycast
+  along its chord, so the only error is the arc sagging away from that chord
+  — `g·dt²/8` ≈ 2cm. Measured against the real integrator it lands within
+  2.1cm at every range, versus bullseye radii of 16–46cm. Stepping finely
+  would have multiplied the scene raycasts (the expensive part, and this runs
+  on the firing frame where a hitch is felt) for no decision it would change.
+  Cost is bounded at 20 raycasts by capping the predicted flight at 620m,
+  rather than by lifetime — a shot into open sky would otherwise cast a
+  hundred times for nothing.
+- Slow motion splits its clocks: the world runs on scaled time so the bullet
+  genuinely crawls, while the camera's easing and the hold after impact run
+  on real time. Without that split the sequence would last as long as the
+  flight does — a blink for a close headshot, an age for a 500m plate — so
+  time scale is instead solved from the flight so it always fills ~2.4s.
 - Impact dust is scaled by distance from the camera, because a miss you
   can't see teaches you nothing — at 400m the original fist-sized spark
   burst was a couple of pixels, so every miss looked identical. Scaling is

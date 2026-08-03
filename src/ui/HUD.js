@@ -42,6 +42,7 @@ export class HUD {
         <div id="scope-range"></div>
       </div>
       <div id="fade"></div>
+      <div id="killcam"><div class="bar top"></div><div class="bar bottom"></div><div id="killcam-label"></div></div>
 
       <div id="stats">
         ${STAT_DEFS.map(([key, label, color]) => `
@@ -253,6 +254,16 @@ export class HUD {
     ctx.fill();
 
     this.el('wind-speed').textContent = `${wind.speed.toFixed(1)} m/s`;
+  }
+
+  /** Letterboxes the view and names the shot. null ends it. The rest of the
+   *  HUD is hidden meanwhile — stat bars over a cinematic look wrong, and
+   *  the crosshair is meaningless when the camera isn't yours. */
+  setKillcam(kind) {
+    const el = this.el('killcam');
+    el.classList.toggle('active', !!kind);
+    document.getElementById('hud').classList.toggle('cinematic', !!kind);
+    if (kind) this.el('killcam-label').textContent = kind;
   }
 
   // ---------------------------------------------------------------- score
