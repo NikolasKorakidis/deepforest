@@ -45,10 +45,10 @@ export class Game {
     container.appendChild(this.renderer.domElement);
 
     this.scene = new THREE.Scene();
-    // Far enough to see the 500m plates down the range lane, with margin
-    // for the ridge behind them.
+    // Far enough to see the 700m plates up on the mountain shelf, with
+    // margin for the ridge standing behind them.
     this.camera = new THREE.PerspectiveCamera(
-      70, window.innerWidth / window.innerHeight, 0.08, 800
+      70, window.innerWidth / window.innerHeight, 0.08, 1200
     );
     this.scene.add(this.camera); // required: viewmodels are camera children
 

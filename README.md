@@ -56,19 +56,20 @@ not part of the running game — see the tree/lake design note below.
 
 ## Gameplay loop
 
-1. **The range** — 40m west of the wreck, a cleared lane with ten pop-up
-   plates at 25, 50, 75, 100, 150, 200, 250, 300, 400 and 500m, fanned ~47m
-   across the lane so no two share a sightline. Three of them (150m, 300m,
-   500m) stand on rises, which varies the shot and lifts those plates clear
-   of the ground behind them. Plates rise, wait, and drop again, so there's
-   a reason to stay on the glass and a reason to hurry — but a plate you
-   *hit* drops for good, so each is a single scoring opportunity and a run
-   is about clearing the range rather than farming the easy 25m plate. It's
+1. **The range** — 40m west of the wreck, a cleared lane with twelve pop-up
+   plates from 25m out to 700m, fanned across the lane so no two share a
+   sightline. Three (150m, 300m, 500m) stand on mounds; past 520m the lane
+   stops being a valley floor and climbs the mountain, so the 600m and 700m
+   plates sit on a shelf 18m and 44m above the firing line — long shots that
+   are also uphill shots. Plates rise, wait, and drop again, so there's a
+   reason to stay on the glass and a reason to hurry — but a plate you *hit*
+   drops for good, so each is a single scoring opportunity and a run is
+   about clearing the range rather than farming the easy 25m plate. It's
    daylight when you start.
 2. **Range it, then hold** — RMB scopes in; the rangefinder reads the
    distance to whatever is centred. Hold the matching BDC mark (mark 3 at
-   300m, half-step ticks for 150m and 250m) and the shot lands on the plate.
-   Under 100m the drop is small enough to ignore.
+   300m, mark 7 at 700m, half-step ticks for 150m and 250m) and the shot
+   lands on the plate. Under 100m the drop is small enough to ignore.
 3. **Read the wind** — the dial top-right shows wind *relative to where
    you're looking*: straight up means it's blowing away from you, right
    means it will carry the bullet right. The windsocks down the lane say the

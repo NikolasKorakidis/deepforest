@@ -52,9 +52,9 @@ export function fbm(x, z, octaves = 4, seed = 0) {
 // the diagonal would have to run through the crash site to be long enough.
 export const WORLD = {
   minX: -200, maxX: 200,
-  minZ: -560, maxZ: 200,
-  sizeX: 400, sizeZ: 760,
-  centerX: 0, centerZ: -180,
+  minZ: -760, maxZ: 200,
+  sizeX: 400, sizeZ: 960,
+  centerX: 0, centerZ: -280,
 };
 
 /**
@@ -66,7 +66,7 @@ export const WORLD = {
 export const RANGE = {
   laneX: -40,
   firingZ: 30,
-  maxDist: 500,
+  maxDist: 700,
   halfWidth: 32,   // cleared ground either side of the centre line
   shoulder: 26,    // blend distance back out to natural terrain
   laneY: 1.4,
@@ -82,11 +82,23 @@ export const RANGE = {
  * outermost, because a 25m plate subtends the most angle but converting
  * that to metres at 25m costs almost nothing.
  */
-export const RANGE_DISTANCES = [25, 50, 75, 100, 150, 200, 250, 300, 400, 500];
-const LANE_STEP_DEG = 3.0;
+export const RANGE_DISTANCES = [25, 50, 75, 100, 150, 200, 250, 300, 400, 500, 600, 700];
+// 2.2° rather than 3°: with twelve targets the outermost lane is now six
+// steps out, and a wider step would fling the 400m plate past the cleared
+// ground. Still far more than the ~0.2° a distant plate subtends, so
+// nothing occludes anything.
+const LANE_STEP_DEG = 2.2;
 
 /** Distances whose plate stands on a rise rather than the lane floor. */
 const HILL_TARGETS = new Set([150, 300, 500]);
+
+// Past this the lane stops being a valley floor and climbs the mountain, so
+// the longest shots are also uphill shots onto a shelf high above the firing
+// line. Ramped with a smoothstep so the ground never rises faster than the
+// sightline to whatever stands on it — see the range verification.
+const CLIMB_START = 520;
+const CLIMB_END = 700;
+const CLIMB_HEIGHT = 42;
 
 export function rangeTargetSpots() {
   const byDistance = [...RANGE_DISTANCES].sort((a, b) => b - a);
@@ -102,7 +114,11 @@ export function rangeTargetSpots() {
 // *easier* to see — it breaks the silhouette off the ground behind it.
 const MOUNDS = rangeTargetSpots()
   .filter((t) => t.onHill)
-  .map((t) => ({ x: t.x, z: t.z, radius: 26, height: 5.5 }));
+  // 14m rather than 26m. A wide mound spills sideways into the *next*
+  // lane's sightline — the 150m rise was standing 0.5m proud of the line to
+  // the 250m plate, hiding it completely. Lane separation is only ~6m at
+  // 150m, so a mound has to stay tight to be a hill rather than a wall.
+  .map((t) => ({ x: t.x, z: t.z, radius: 14, height: 5.5 }));
 
 const RANGE_END_Z = RANGE.firingZ - RANGE.maxDist - 45;
 
@@ -183,9 +199,11 @@ export function terrainHeight(x, z) {
  * check in the range verification.
  */
 function rangeFloor(x, z) {
+  const along = RANGE.firingZ - z;
   let y = RANGE.laneY
     + 1.15 * Math.sin(z * 0.017 + 0.6)
-    + 0.7 * Math.sin(x * 0.035 + z * 0.008);
+    + 0.7 * Math.sin(x * 0.035 + z * 0.008)
+    + CLIMB_HEIGHT * smoothstep(CLIMB_START, CLIMB_END, along);
 
   for (const m of MOUNDS) {
     const d = Math.hypot(x - m.x, z - m.z);

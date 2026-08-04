@@ -199,7 +199,7 @@ export class Environment {
     // distance, so the old value left a 500m plate at ~3% visibility — the
     // far end of the range was literally not there. At 0.0014 it's hazy but
     // legible, which is also the more honest look for long-range shooting.
-    this.scene.fog.density = lerp(nightFogDensity, 0.0014, this.daylight);
+    this.scene.fog.density = lerp(nightFogDensity, 0.0011, this.daylight);
 
     // Clouds (once they exist) hide stars and the moon, not just dim them.
     const nightVisibility = (1 - this.daylight) * (1 - this.cloudCover);

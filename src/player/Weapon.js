@@ -90,7 +90,7 @@ export class Weapon {
     // distance to anything in the scene (not just wolves), so it needs its
     // own far plane matching the camera's.
     this.rangeRaycaster = new THREE.Raycaster();
-    this.rangeRaycaster.far = 420; // matches the camera's far plane
+    this.rangeRaycaster.far = 1000; // must out-reach the furthest target (700m)
 
     this._buildViewmodels();
 
@@ -310,8 +310,10 @@ export class Weapon {
     let t = 0;
 
     // Bounded by distance rather than lifetime: a shot into empty sky would
-    // otherwise raycast the scene a hundred times for nothing.
-    while (travelled < 620) {
+    // otherwise raycast the scene a hundred times for nothing. Has to
+    // out-reach the furthest plate (700m) or the kill cam could never fire
+    // on the longest shots in the game.
+    while (travelled < 900) {
       prev.copy(pos);
       pos.addScaledVector(vel, step);
       pos.x += 0.5 * ax * step * step;
