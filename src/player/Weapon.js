@@ -273,15 +273,18 @@ export class Weapon {
     // trigger, and the camera commits before anyone knows for certain.
     if (this.onSpecialShot) {
       const shot = this._predictShot(muzzlePos, bullet.vel);
-      const earned = shot
-        && ((shot.special && CONFIG.killcam.alwaysOnSpecial)
-          || Math.random() < CONFIG.killcam.chance);
-      if (earned) this.onSpecialShot({ ...shot, bullet });
+      // _predictShot only reports shots worth celebrating, so the roll is
+      // purely about rarity.
+      if (shot && Math.random() < CONFIG.killcam.chance) {
+        this.onSpecialShot({ ...shot, bullet });
+      }
     }
   }
 
   /**
    * Flies a throwaway copy of the shot to find what it will hit and where.
+   * Reports only the shots the kill cam cares about — a headshot or a plate
+   * struck dead centre — and null for everything else.
    *
    * Deliberately coarse — 1/25s steps, ~32m of travel each. That sounds
    * reckless for deciding a bullseye, but each step is a *swept* raycast
@@ -332,21 +335,16 @@ export class Weapon {
 
       let obj = hit.object;
       while (obj && !obj.userData.wolfRef && !obj.userData.rangeTarget) obj = obj.parent;
-      // Terrain and scenery still qualify for the random roll — watching a
-      // round bury itself in a hillside in slow motion is half the appeal,
-      // and it means the camera isn't a reliable tell that you hit.
-      if (!obj) return { kind: '', point: hit.point.clone(), flightTime: t, special: false };
+      if (!obj) return null; // terrain or scenery — nothing to celebrate
 
       const point = hit.point.clone();
       const wolf = obj.userData.wolfRef;
       if (wolf && !wolf.dead && wolf.isHeadshot(point)) {
-        return { kind: 'HEADSHOT', point, flightTime: t, special: true };
+        return { kind: 'HEADSHOT', point, flightTime: t };
       }
       const target = obj.userData.rangeTarget;
-      if (target && target.up && !target.knocked) {
-        return target.isBullseye(point)
-          ? { kind: 'BULLSEYE', point, flightTime: t, special: true }
-          : { kind: 'HIT', point, flightTime: t, special: false };
+      if (target && target.up && !target.knocked && target.isBullseye(point)) {
+        return { kind: 'BULLSEYE', point, flightTime: t };
       }
       return null; // a hit, but an ordinary one
     }
