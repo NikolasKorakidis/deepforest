@@ -123,7 +123,10 @@ export class Game {
     // gauge alike — so what the gauge shows is literally what pushes the
     // bullet, and a player who learns to read it is actually right.
     this.wind = new Wind();
-    this.range = new Range({ scene: this.scene, hud: this.hud, sfx: this.sfx });
+    this.range = new Range({
+      scene: this.scene, hud: this.hud, sfx: this.sfx,
+      interactions: this.interactions, weapon: this.weapon,
+    });
 
     this.killcam = new KillCam({
       camera: this.camera, scene: this.scene, hud: this.hud,

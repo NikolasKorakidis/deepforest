@@ -180,6 +180,59 @@ class Target {
   }
 }
 
+/** How many rounds a visit to the crate leaves you holding. */
+const RESUPPLY_RESERVE = 60;
+
+/**
+ * The ammunition crate behind the firing line. Unlimited and repeatable —
+ * a practice range you can run dry isn't one, and until this existed the
+ * rifle's starting ten rounds were the only ammunition in the game.
+ */
+class AmmoCrate {
+  constructor(x, z, groundY) {
+    this.group = new THREE.Group();
+    this.group.position.set(x, groundY, z);
+    this.group.rotation.y = -0.25; // set at an angle, not squared to the world
+
+    const w = 1.35, h = 0.85, d = 0.9;
+    const body = new THREE.Mesh(
+      new THREE.BoxGeometry(w, h, d),
+      new THREE.MeshStandardMaterial({ color: 0x4b5233, roughness: 0.9 })
+    );
+    body.position.y = h / 2;
+    body.castShadow = true;
+    body.receiveShadow = true;
+    this.group.add(body);
+
+    // Lid rim and a banding strap, so it reads as a crate rather than a box.
+    const trimMat = new THREE.MeshStandardMaterial({ color: 0x33381f, roughness: 0.85 });
+    const lid = new THREE.Mesh(new THREE.BoxGeometry(w * 1.04, 0.1, d * 1.04), trimMat);
+    lid.position.y = h;
+    this.group.add(lid);
+    for (const sx of [-w * 0.28, w * 0.28]) {
+      const strap = new THREE.Mesh(new THREE.BoxGeometry(0.07, h, d * 1.02), trimMat);
+      strap.position.set(sx, h / 2, 0);
+      this.group.add(strap);
+    }
+
+    // Sign above it. Double-sided so it reads whichever way you walk up —
+    // you approach from the crash site but turn back to it from the line.
+    const label = new THREE.Mesh(
+      new THREE.PlaneGeometry(1.5, 0.75),
+      new THREE.MeshBasicMaterial({
+        map: makeLabelTexture('AMMO'), toneMapped: false, side: THREE.DoubleSide,
+      })
+    );
+    label.position.y = h + 0.62;
+    this.group.add(label);
+
+    const postMat = new THREE.MeshStandardMaterial({ color: 0x3a3a3e, roughness: 0.9 });
+    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.62, 6), postMat);
+    post.position.y = h + 0.31;
+    this.group.add(post);
+  }
+}
+
 /** A windsock on a pole: the in-world read on wind, before you trust the
  *  gauge. Yaws to the wind and lifts toward horizontal as it strengthens. */
 class Windsock {
@@ -220,7 +273,7 @@ class Windsock {
 }
 
 export class Range {
-  constructor({ scene, hud, sfx }) {
+  constructor({ scene, hud, sfx, interactions, weapon }) {
     this.hud = hud;
     this.sfx = sfx;
     this.score = 0;
@@ -256,6 +309,24 @@ export class Range {
     // Socks down the lane, so wind is readable at the distance you're
     // shooting rather than only at your feet — the far one is what matters
     // for a 500m shot.
+    // Ammunition, behind the line so it's never in the way of a shot.
+    const crateX = RANGE.laneX + 4.5;
+    const crateZ = RANGE.firingZ + 4;
+    scene.add(new AmmoCrate(crateX, crateZ, terrainHeight(crateX, crateZ)).group);
+    if (interactions && weapon) {
+      interactions.add({
+        position: new THREE.Vector3(crateX, terrainHeight(crateX, crateZ) + 0.6, crateZ),
+        radius: 3.2,
+        label: 'Resupply ammunition',
+        // Never disabled — the whole point is that it can't run out.
+        onUse: () => {
+          weapon.reserveAmmo = Math.max(weapon.reserveAmmo, RESUPPLY_RESERVE);
+          this.sfx.pickup();
+          this.hud.toast(`Ammunition resupplied — ${weapon.reserveAmmo} rounds.`, 2200);
+        },
+      });
+    }
+
     // Alternating sides so there's one in view wherever you're pointed, and
     // set in from the corridor edge so they read against the lane rather
     // than against the treeline.

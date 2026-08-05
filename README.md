@@ -66,25 +66,27 @@ not part of the running game — see the tree/lake design note below.
    drops for good, so each is a single scoring opportunity and a run is
    about clearing the range rather than farming the easy 25m plate. It's
    daylight when you start.
-2. **Range it, then hold** — RMB scopes in; the rangefinder reads the
+2. **Ammunition** — a crate marked AMMO sits 4m behind the firing line.
+   Press E for an unlimited resupply; it never runs out and never disables.
+3. **Range it, then hold** — RMB scopes in; the rangefinder reads the
    distance to whatever is centred. Hold the matching BDC mark (mark 3 at
    300m, mark 7 at 700m, half-step ticks for 150m and 250m) and the shot
    lands on the plate. Under 100m the drop is small enough to ignore.
-3. **Read the wind** — the dial top-right shows wind *relative to where
+4. **Read the wind** — the dial top-right shows wind *relative to where
    you're looking*: straight up means it's blowing away from you, right
    means it will carry the bullet right. The windsocks down the lane say the
    same thing in the world. Under 200m wind is negligible; at 400m and 500m
    ignoring it is a clean miss.
-4. **Kill cam** — occasionally the world drops into slow motion and the
+5. **Kill cam** — occasionally the world drops into slow motion and the
    camera pulls off your shoulder to chase the round in. Only a wolf
    headshot or a plate struck dead centre can earn it, and even then only
    30% of the time (`CONFIG.killcam.chance`) — rare enough to stay a
    moment rather than a routine.
-5. **Score** — each plate is worth `10 + distance/10`, so the 500m plate pays
+6. **Score** — each plate is worth `10 + distance/10`, so the 500m plate pays
    about five times the 25m one. Dead centre doubles it. Chained hits build a multiplier up to x5;
    let six seconds lapse without a hit and it resets. Watch where your
    misses kick up dust — that's how you learn the hold.
-6. **The wilderness is still there** — gather wood (E at any tree), build a
+7. **The wilderness is still there** — gather wood (E at any tree), build a
    fire (T), cook and sleep at it, drink at the lake. Six wolves hold the
    water and the ridge above it; a headshot drops one instantly, a body shot
    wounds and slows it.
