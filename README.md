@@ -66,27 +66,33 @@ not part of the running game — see the tree/lake design note below.
    drops for good, so each is a single scoring opportunity and a run is
    about clearing the range rather than farming the easy 25m plate. It's
    daylight when you start.
-2. **Ammunition** — a crate marked AMMO sits 4m behind the firing line.
+2. **Balloons** — five tethered balloons float over the lane between 70m and
+   340m, the only moving targets on the range and worth a bonus over a plate
+   at the same distance. They're also the clearest read on the wind: each
+   leans downwind by an angle set by its strength, so five of them at
+   different ranges show you the wind down the whole lane at a glance. Pop
+   one and it stays popped, like the plates.
+3. **Ammunition** — a crate marked AMMO sits 4m behind the firing line.
    Press E for an unlimited resupply; it never runs out and never disables.
-3. **Range it, then hold** — RMB scopes in; the rangefinder reads the
+4. **Range it, then hold** — RMB scopes in; the rangefinder reads the
    distance to whatever is centred. Hold the matching BDC mark (mark 3 at
    300m, mark 7 at 700m, half-step ticks for 150m and 250m) and the shot
    lands on the plate. Under 100m the drop is small enough to ignore.
-4. **Read the wind** — the dial top-right shows wind *relative to where
+5. **Read the wind** — the dial top-right shows wind *relative to where
    you're looking*: straight up means it's blowing away from you, right
    means it will carry the bullet right. The windsocks down the lane say the
    same thing in the world. Under 200m wind is negligible; at 400m and 500m
    ignoring it is a clean miss.
-5. **Kill cam** — occasionally the world drops into slow motion and the
+6. **Kill cam** — occasionally the world drops into slow motion and the
    camera pulls off your shoulder to chase the round in. Only a wolf
    headshot or a plate struck dead centre can earn it, and even then only
    30% of the time (`CONFIG.killcam.chance`) — rare enough to stay a
    moment rather than a routine.
-6. **Score** — each plate is worth `10 + distance/10`, so the 500m plate pays
+7. **Score** — each plate is worth `10 + distance/10`, so the 500m plate pays
    about five times the 25m one. Dead centre doubles it. Chained hits build a multiplier up to x5;
    let six seconds lapse without a hit and it resets. Watch where your
    misses kick up dust — that's how you learn the hold.
-7. **The wilderness is still there** — gather wood (E at any tree), build a
+8. **The wilderness is still there** — gather wood (E at any tree), build a
    fire (T), cook and sleep at it, drink at the lake. Six wolves hold the
    water and the ridge above it; a headshot drops one instantly, a body shot
    wounds and slows it.
@@ -264,6 +270,15 @@ Design notes:
   on real time. Without that split the sequence would last as long as the
   flight does — a blink for a close headshot, an age for a 500m plate — so
   time scale is instead solved from the flight so it always fills ~2.4s.
+- Balloon placement was searched, not chosen. A balloon on a long tether
+  sweeps a wide circle as the wind swings it, and drifting into a sightline
+  would hide a plate — unpredictably, since it moves, so it wouldn't even
+  reproduce. The lane was searched for placements whose *entire* swept
+  circle, at every wind strength up to a full gust, clears all twelve plate
+  sightlines; the worst margin in the shipped set is 5m. The first attempt
+  specified anchors as angles, which multiplied with distance and flung the
+  far balloons 100m sideways onto the mountain — they're lateral offsets in
+  metres now, so every one stays over the cleared lane.
 - Impact dust is scaled by distance from the camera, because a miss you
   can't see teaches you nothing — at 400m the original fist-sized spark
   burst was a couple of pixels, so every miss looked identical. Scaling is

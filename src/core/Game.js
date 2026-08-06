@@ -422,6 +422,7 @@ export class Game {
       kills: this.kills,
       score: this.range.score,
       rangeKnocked: this.range.knockedDistances,
+      rangePopped: this.range.poppedBalloons,
       player: {
         x: this.controller.position.x,
         y: this.controller.position.y,
@@ -474,6 +475,7 @@ export class Game {
     this.kills = data.kills;
     if (data.score) { this.range.score = data.score; this.hud.setScore(data.score, 0); }
     this.range.restore(data.rangeKnocked ?? []);
+    this.range.restoreBalloons(data.rangePopped ?? []);
 
 
     for (const f of data.campfires) this.campfires.rebuild(f.x, f.z, f.fuel, this.hud);

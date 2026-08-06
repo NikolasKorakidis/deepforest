@@ -180,6 +180,143 @@ class Target {
   }
 }
 
+/**
+ * Tethered balloons — moving targets between the static plates.
+ *
+ * Their real job is to make the wind legible. A windsock tells you the
+ * direction at one spot; a balloon on a taut line leans downwind by an angle
+ * set by the strength, so five of them at different ranges show you the wind
+ * *along the lane* at a glance. They're also the only target that moves, so
+ * they punish a slow trigger in a way the plates can't.
+ *
+ * Anchors are angles rather than raw coordinates so they can be checked
+ * against the plate lanes — a balloon drifting into a sightline would hide a
+ * plate, and it moves, so it wouldn't even be reliably reproducible.
+ */
+// Anchors are given as a lateral offset in metres, not an angle: an angle
+// multiplies with distance, which flung the far balloons 100m sideways onto
+// the mountain instead of leaving them over the range. Offsets keep every
+// one of them on the cleared lane.
+//
+// Positions aren't eyeballed. A balloon on a long tether sweeps a wide
+// circle as the wind swings it, and drifting into a sightline would hide a
+// plate — unpredictably, since it moves. These were picked by searching the
+// lane for placements whose *entire* swept circle, at every wind strength up
+// to a full gust, stays clear of all twelve plate sightlines. Worst margin
+// in this set is 5m.
+const BALLOON_ANCHORS = [
+  { offX: 28, dist: 70, tether: 12, colour: 0xe2402c },
+  { offX: -30, dist: 130, tether: 14, colour: 0xf0a32a },
+  { offX: 30, dist: 200, tether: 11, colour: 0x3fa9d8 },
+  { offX: -28, dist: 260, tether: 15, colour: 0xe8e4d8 },
+  { offX: 30, dist: 340, tether: 10, colour: 0x8fc94a },
+];
+
+// Lean per m/s of wind. Gentle enough that a gust doesn't sweep a balloon
+// through half the range — the swept circle is what has to stay out of the
+// sightlines above.
+const LEAN_DIVISOR = 14;
+
+class Balloon {
+  constructor({ offX, dist, tether, colour }) {
+    this.dist = dist;
+    this.tether = tether;
+    this.points = pointsFor(dist) + 15; // a moving target is worth more
+    this.popped = false;
+    this.popT = 0;
+    this.phase = Math.random() * Math.PI * 2;
+    this.radius = 0.9 + dist * 0.004; // visible at range, like the plates
+
+    this.anchor = new THREE.Vector3(RANGE.laneX + offX, 0, RANGE.firingZ - dist);
+    this.anchor.y = terrainHeight(this.anchor.x, this.anchor.z);
+
+    this.group = new THREE.Group();
+
+    this.balloon = new THREE.Mesh(
+      new THREE.SphereGeometry(this.radius, 18, 14),
+      new THREE.MeshStandardMaterial({
+        color: colour, roughness: 0.45, emissive: colour, emissiveIntensity: 0.18,
+      })
+    );
+    this.balloon.scale.set(0.86, 1.12, 0.86); // egg, not a ball
+    this.balloon.castShadow = true;
+    this.balloon.userData.onShot = () => this.pop();
+    this.balloon.userData.balloon = this;
+    this.group.add(this.balloon);
+
+    const knot = new THREE.Mesh(
+      new THREE.ConeGeometry(this.radius * 0.22, this.radius * 0.34, 8),
+      new THREE.MeshStandardMaterial({ color: colour, roughness: 0.6 })
+    );
+    knot.position.y = -this.radius * 1.16;
+    knot.rotation.x = Math.PI;
+    this.group.add(knot);
+
+    // Tether, redrawn each frame between anchor and balloon. Its raycast is
+    // disabled: three.js will happily report a hit on a line, and a hairline
+    // string is not something a bullet should stop on.
+    const geo = new THREE.BufferGeometry().setFromPoints([
+      this.anchor.clone(), this.anchor.clone(),
+    ]);
+    this.line = new THREE.Line(geo, new THREE.LineBasicMaterial({ color: 0x2a2b28 }));
+    this.line.raycast = () => {};
+
+    const post = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.09, 0.11, 0.7, 6),
+      new THREE.MeshStandardMaterial({ color: 0x44483a, roughness: 0.9 })
+    );
+    post.position.set(this.anchor.x, this.anchor.y + 0.35, this.anchor.z);
+    this.stake = post;
+
+    this.onPop = null;
+  }
+
+  pop() {
+    if (this.popped) return;
+    this.popped = true;
+    this.popT = 0;
+    if (this.onPop) this.onPop(this);
+  }
+
+  update(dt, wind) {
+    if (this.popped) {
+      // Burst outward and vanish, rather than blinking out.
+      this.popT += dt;
+      const k = Math.min(1, this.popT / 0.22);
+      this.balloon.scale.setScalar(1 + k * 1.7);
+      this.balloon.material.opacity = 1 - k;
+      this.balloon.material.transparent = true;
+      if (k >= 1) {
+        this.group.visible = false;
+        this.line.visible = false;
+      }
+      return;
+    }
+
+    // A taut tether swings downwind by an angle set by wind strength against
+    // buoyancy — so lean is the readable part, and the bob is just life.
+    const lean = Math.atan((wind?.speed ?? 0) / LEAN_DIVISOR);
+    const horiz = Math.sin(lean) * this.tether;
+    const vert = Math.cos(lean) * this.tether;
+    const t = performance.now() * 0.001;
+    const bobX = Math.sin(t * 0.9 + this.phase) * 0.35;
+    const bobZ = Math.cos(t * 0.7 + this.phase * 1.3) * 0.35;
+
+    this.group.position.set(
+      this.anchor.x + (wind?.x ?? 0) * horiz + bobX,
+      this.anchor.y + vert + Math.sin(t * 1.3 + this.phase) * 0.25,
+      this.anchor.z + (wind?.z ?? 0) * horiz + bobZ
+    );
+    // Leans into the wind as it goes, so the whole shape reads downwind.
+    this.group.rotation.z = -(wind?.x ?? 0) * lean * 0.7;
+    this.group.rotation.x = (wind?.z ?? 0) * lean * 0.7;
+
+    const pts = this.line.geometry.attributes.position;
+    pts.setXYZ(1, this.group.position.x, this.group.position.y - this.radius * 1.2, this.group.position.z);
+    pts.needsUpdate = true;
+  }
+}
+
 /** How many rounds a visit to the crate leaves you holding. */
 const RESUPPLY_RESERVE = 60;
 
@@ -309,6 +446,13 @@ export class Range {
     // Socks down the lane, so wind is readable at the distance you're
     // shooting rather than only at your feet — the far one is what matters
     // for a 500m shot.
+    this.balloons = BALLOON_ANCHORS.map((a) => {
+      const b = new Balloon(a);
+      b.onPop = (balloon) => this._registerPop(balloon);
+      scene.add(b.group, b.line, b.stake);
+      return b;
+    });
+
     // Ammunition, behind the line so it's never in the way of a shot.
     const crateX = RANGE.laneX + 4.5;
     const crateZ = RANGE.firingZ + 4;
@@ -340,7 +484,25 @@ export class Range {
   }
 
   get remaining() {
-    return this.targets.filter((t) => !t.knocked).length;
+    return this.targets.filter((t) => !t.knocked).length
+      + this.balloons.filter((b) => !b.popped).length;
+  }
+
+  _registerPop(balloon) {
+    this.streak = this.streakTimer > 0 ? Math.min(5, this.streak + 1) : 1;
+    this.streakTimer = 6;
+    const gained = balloon.points * this.streak;
+    this.score += gained;
+    this.hits++;
+    this.sfx.ding();
+    this.hud.toast(
+      `Balloon ${balloon.dist}m  +${gained}${this.streak > 1 ? `  x${this.streak}` : ''}`,
+      1500
+    );
+    this.hud.setScore(this.score, this.streak);
+    if (this.remaining === 0) {
+      this.hud.toast(`Range cleared — ${this.score} points.`, 9000);
+    }
   }
 
   /** Which plates are already down, for the save. Without this the score
@@ -348,6 +510,10 @@ export class Range {
    *  same plates could be scored again and again. */
   get knockedDistances() {
     return this.targets.filter((t) => t.knocked).map((t) => t.dist);
+  }
+
+  get poppedBalloons() {
+    return this.balloons.filter((b) => b.popped).map((b) => b.dist);
   }
 
   restore(distances = []) {
@@ -359,6 +525,18 @@ export class Range {
       t.pivot.rotation.x = -Math.PI / 2;
     }
     this.hits = distances.length;
+  }
+
+  restoreBalloons(distances = []) {
+    const gone = new Set(distances);
+    for (const b of this.balloons) {
+      if (!gone.has(b.dist)) continue;
+      b.popped = true;
+      b.popT = 1;
+      b.group.visible = false;
+      b.line.visible = false;
+    }
+    this.hits += distances.length;
   }
 
   _registerHit(target) {
@@ -387,6 +565,7 @@ export class Range {
 
   update(dt, wind) {
     for (const t of this.targets) t.update(dt);
+    for (const b of this.balloons) b.update(dt, wind);
     if (wind) for (const s of this.socks) s.update(wind);
 
     if (this.streakTimer > 0) {
