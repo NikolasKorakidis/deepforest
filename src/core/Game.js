@@ -21,6 +21,7 @@ import { PerfScaler } from './PerfScaler.js';
 import { Range } from '../world/Range.js';
 import { Wind } from '../world/Wind.js';
 import { KillCam } from './KillCam.js';
+import { Focus } from '../player/Focus.js';
 
 import { allAssetsSettled, loadProgress } from './assets.js';
 
@@ -89,6 +90,7 @@ export class Game {
       sfx: this.sfx,
       getWorld: () => this.scene,
       getWind: () => this.wind,
+      getFocus: () => this.focus,
     });
     this.campfires = new CampfireSystem(
       this.scene, this.sfx, this.interactions,
@@ -123,6 +125,7 @@ export class Game {
     // gauge alike — so what the gauge shows is literally what pushes the
     // bullet, and a player who learns to read it is actually right.
     this.wind = new Wind();
+    this.focus = new Focus({ input: this.input });
     this.range = new Range({
       scene: this.scene, hud: this.hud, sfx: this.sfx,
       interactions: this.interactions, weapon: this.weapon,
@@ -223,7 +226,16 @@ export class Game {
     // Real elapsed time drives the kill cam's own choreography; everything
     // in the world runs on the scaled clock, which is what slow motion is.
     const real = Math.min(0.05, this.clock.getDelta());
-    const dt = real * this.killcam.timeScale;
+
+    // Two systems can slow the world. The kill cam outranks focus: it has
+    // taken the camera away, and letting a held breath stretch a cinematic
+    // as well would compound two slowdowns into a crawl.
+    const scoped = this.state === 'playing' && !this.killcam.active && this.weapon.scopeView;
+    this.focus.update(real, scoped);
+    this.controller.blockSprint = this.weapon.scopeView;
+    this.hud.setFocus(this.focus);
+
+    const dt = real * (this.killcam.active ? this.killcam.timeScale : this.focus.timeScale);
     if (this.state === 'playing') this.update(dt);
     if (this.state === 'loading') this.hud.setLoadingProgress(loadProgress());
 

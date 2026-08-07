@@ -395,6 +395,36 @@ html, body {
 }
 .screen button:hover { background: rgba(216, 212, 200, 0.15); }
 
+/* ------------------------------------------------------------------- focus */
+#focus {
+  position: absolute;
+  left: 50%; top: calc(50% + 20vmin);
+  transform: translateX(-50%);
+  width: 170px;
+  opacity: 0;
+  transition: opacity 0.2s;
+  text-align: center;
+}
+#focus.active { opacity: 1; }
+#focus-bar {
+  height: 4px;
+  background: rgba(8, 10, 12, 0.55);
+  border: 1px solid rgba(216, 212, 200, 0.3);
+  border-radius: 2px;
+  overflow: hidden;
+}
+#focus-bar > i { display: block; height: 100%; width: 100%; background: #d8d4c8; }
+#focus.recovering #focus-bar > i { background: #b8593a; }
+#focus-label {
+  margin-top: 4px;
+  font: 600 10px/1 'Courier New', monospace;
+  letter-spacing: 0.18em;
+  color: #d8d4c8;
+  opacity: 0.75;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.9);
+}
+#hud.cinematic #focus { display: none !important; }
+
 /* ----------------------------------------------------------------- killcam */
 #killcam { position: absolute; inset: 0; pointer-events: none; opacity: 0; transition: opacity 0.25s; }
 #killcam.active { opacity: 1; }

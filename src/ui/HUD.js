@@ -42,6 +42,7 @@ export class HUD {
         <div id="scope-range"></div>
       </div>
       <div id="fade"></div>
+      <div id="focus"><div id="focus-bar"><i></i></div><div id="focus-label"></div></div>
       <div id="killcam"><div class="bar top"></div><div class="bar bottom"></div><div id="killcam-label"></div></div>
 
       <div id="stats">
@@ -86,7 +87,7 @@ export class HUD {
           steel plates from 25 to 500 metres.<br>
           Range them, read the wind, and see what you can hit.</p>
           <div class="controls">
-            <span><b>WASD</b> move</span><span><b>Shift</b> sprint</span>
+            <span><b>WASD</b> move</span><span><b>Shift</b> sprint / hold breath</span>
             <span><b>C / Ctrl</b> crouch</span><span><b>Z</b> prone</span>
             <span><b>Mouse</b> look</span><span><b>E</b> interact</span>
             <span><b>LMB</b> fire</span><span><b>RMB</b> toggle aim / zoom</span>
@@ -264,6 +265,24 @@ export class HUD {
     el.classList.toggle('active', !!kind);
     document.getElementById('hud').classList.toggle('cinematic', !!kind);
     if (kind) this.el('killcam-label').textContent = kind;
+  }
+
+  /**
+   * Breath meter under the reticle. Only shown when it's actionable —
+   * while holding, and while recovering — so it isn't a permanent fixture
+   * of a view whose whole job is to be uncluttered.
+   */
+  setFocus(focus) {
+    const el = this.el('focus');
+    const show = focus.state !== 'ready';
+    el.classList.toggle('active', show);
+    if (!show) return;
+    const holding = focus.state === 'holding';
+    el.classList.toggle('recovering', !holding);
+    this.el('focus-bar').firstElementChild.style.width = `${Math.max(0, focus.fraction) * 100}%`;
+    this.el('focus-label').textContent = holding
+      ? 'HOLDING BREATH'
+      : `RECOVERING  ${Math.ceil(focus.recovery)}s`;
   }
 
   // ---------------------------------------------------------------- score

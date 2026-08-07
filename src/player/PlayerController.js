@@ -28,11 +28,14 @@ export class PlayerController {
     this.crouchToggled = false; // KeyC toggles; Ctrl still crouches only while held
     this.proneToggled = false; // KeyZ toggles
 
+    // Set by Game while the scope is up: Shift means hold-breath there, not
+    // sprint, and the two can't both own the key.
+    this.blockSprint = false;
+
     // Where the ground is, what stops you and how far you can walk are all
     // injectable rather than hard-wired to the wilderness heightfield, so a
-    // second level (the shooting range) can supply flat ground, no
-    // obstacles and its own much longer bounds without the controller
-    // knowing anything about either place.
+    // second level could supply flat ground, no obstacles and its own bounds
+    // without the controller knowing anything about either place.
     this.groundAt = terrainHeight;
     this.bounds = {
       minX: WORLD.minX + 8, maxX: WORLD.maxX - 8,
@@ -74,7 +77,7 @@ export class PlayerController {
     const ctrlHeld = this.input.isDown('ControlLeft') || this.input.isDown('ControlRight');
     const shiftHeld = this.input.isDown('ShiftLeft') || this.input.isDown('ShiftRight');
     const exhausted = this.stats.energy < 12;
-    const wantsSprint = moving && f > 0 && !exhausted && shiftHeld;
+    const wantsSprint = moving && f > 0 && !exhausted && shiftHeld && !this.blockSprint;
 
     this.stance = wantsSprint ? 'stand'
       : this.proneToggled ? 'prone'

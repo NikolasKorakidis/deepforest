@@ -41,7 +41,7 @@ not part of the running game — see the tree/lake design note below.
 | Key | Action |
 | --- | --- |
 | WASD / Mouse | Move / look (click to capture the mouse) |
-| Shift | Sprint (drains energy; forces you up out of crouch/prone) |
+| Shift | Sprint (drains energy; forces you up out of crouch/prone) — **while scoped** instead holds your breath: 5s of steadied aim and slowed time, then 20s to recover |
 | C (toggle) / Ctrl (hold) | Crouch — slower, lower camera, narrows wolf detection range |
 | Z (toggle) | Prone — slower still, lowest profile, narrows wolf detection range the most |
 | E | Interact / pick up |
@@ -78,21 +78,26 @@ not part of the running game — see the tree/lake design note below.
    distance to whatever is centred. Hold the matching BDC mark (mark 3 at
    300m, mark 7 at 700m, half-step ticks for 150m and 250m) and the shot
    lands on the plate. Under 100m the drop is small enough to ignore.
-5. **Read the wind** — the dial top-right shows wind *relative to where
+5. **Hold your breath** — with the scope settled, hold **Shift**: the world
+   drops to 40% speed and the reticle all but stops wandering for five
+   seconds. That's the window for the shot you couldn't otherwise take — a
+   plate about to drop, or a balloon swinging on its tether. It then needs
+   twenty seconds to recover, and letting go early doesn't bank any of it.
+6. **Read the wind** — the dial top-right shows wind *relative to where
    you're looking*: straight up means it's blowing away from you, right
    means it will carry the bullet right. The windsocks down the lane say the
    same thing in the world. Under 200m wind is negligible; at 400m and 500m
    ignoring it is a clean miss.
-6. **Kill cam** — occasionally the world drops into slow motion and the
+7. **Kill cam** — occasionally the world drops into slow motion and the
    camera pulls off your shoulder to chase the round in. Only a wolf
    headshot or a plate struck dead centre can earn it, and even then only
    30% of the time (`CONFIG.killcam.chance`) — rare enough to stay a
    moment rather than a routine.
-7. **Score** — each plate is worth `10 + distance/10`, so the 500m plate pays
+8. **Score** — each plate is worth `10 + distance/10`, so the 500m plate pays
    about five times the 25m one. Dead centre doubles it. Chained hits build a multiplier up to x5;
    let six seconds lapse without a hit and it resets. Watch where your
    misses kick up dust — that's how you learn the hold.
-8. **The wilderness is still there** — gather wood (E at any tree), build a
+9. **The wilderness is still there** — gather wood (E at any tree), build a
    fire (T), cook and sleep at it, drink at the lake. Six wolves hold the
    water and the ridge above it; a headshot drops one instantly, a body shot
    wounds and slows it.
@@ -315,6 +320,16 @@ Design notes:
     puzzle. Verified end to end by integrating the real trajectory: every
     target from 25m to 500m lands inside its plate, and 100m–500m land
     within 2cm of plate centre.
+- Focus timers run on *real* time, not the scaled clock they themselves
+  create. Measured on the slowed clock a "5 second" hold would silently last
+  two and a half times longer than advertised, and the cooldown likewise —
+  the same split the kill cam needs, for the same reason.
+- Two systems can slow the world, so the order is explicit: the kill cam
+  outranks focus. It has already taken the camera away, and letting a held
+  breath stretch a cinematic as well would compound two slowdowns into a
+  crawl. Shift is likewise arbitrated rather than shared — `blockSprint`
+  hands the key to the breath hold while the scope is up, since sprinting
+  and steadying a rifle are not things you do at once.
 - Wind is one object read by three unrelated consumers — the bullet solver,
   the grass shader and the HUD dial. That sharing is the whole design: what
   the dial shows *is* the vector that pushes the bullet, so a player who

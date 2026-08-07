@@ -47,7 +47,7 @@ const HIP_POS = new THREE.Vector3(-0.075, -0.21, -0.055);
 const AIM_POS = new THREE.Vector3(0.055, -0.26, -0.025);
 
 export class Weapon {
-  constructor({ camera, input, controller, hud, sfx, getWorld, getWind }) {
+  constructor({ camera, input, controller, hud, sfx, getWorld, getWind, getFocus }) {
     this.camera = camera;
     this.input = input;
     this.controller = controller;
@@ -55,6 +55,7 @@ export class Weapon {
     this.sfx = sfx;
     this.getWorld = getWorld;
     this.getWind = getWind; // shared Wind instance; see _updateBullets
+    this.getFocus = getFocus; // hold-breath state; steadies the sway below
 
     this.equipped = null; // 'rifle' | 'binoculars' | null
     this.hasRifle = false;
@@ -584,7 +585,10 @@ export class Weapon {
     }
     // The scope view only appears once the zoom-in animation has actually
     // settled on its target FOV, not the instant RMB goes down.
-    const scopeView = rifleAim && Math.abs(this.camera.fov - targetFov) < 0.5;
+    // Exposed because Focus gates the breath hold on it, and the controller
+    // suppresses sprint while it's true.
+    this.scopeView = rifleAim && Math.abs(this.camera.fov - targetFov) < 0.5;
+    const scopeView = this.scopeView;
     this.hud.setBinocularMask(binocAim);
     this.hud.setCrosshair(this.equipped === 'rifle' && !binocAim && !scopeView);
     this.hud.setScopeView(scopeView, scopeView ? this._rangefinder() : null);
@@ -608,7 +612,9 @@ export class Weapon {
       this.swayTime += dt;
       const stanceMult = A.stanceMult[this.controller.stance] ?? 1;
       const energyMult = THREE.MathUtils.lerp(A.energySwayMax, 1, this.controller.stats.energy / 100);
-      const amp = THREE.MathUtils.degToRad(A.swayMaxDeg) * stanceMult * energyMult * this.aimAmount;
+      const focusMult = this.getFocus?.().swayMult ?? 1;
+      const amp = THREE.MathUtils.degToRad(A.swayMaxDeg)
+        * stanceMult * energyMult * focusMult * this.aimAmount;
       const swayPitch = (Math.sin(this.swayTime * 0.9) * 0.6 + Math.sin(this.swayTime * 2.3 + 1.7) * 0.4) * amp;
       const swayYaw = (Math.sin(this.swayTime * 0.75 + 0.5) * 0.6 + Math.sin(this.swayTime * 1.9 + 3.1) * 0.4) * amp;
       this.camera.rotation.x += swayPitch;

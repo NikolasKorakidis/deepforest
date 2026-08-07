@@ -111,6 +111,14 @@ export const CONFIG = {
     },
   },
 
+  // Hold-breath focus (see player/Focus.js). Seconds are real seconds.
+  focus: {
+    holdSeconds: 5,
+    cooldownSeconds: 20,
+    timeScale: 0.4,   // the world crawls; your five seconds buy more of it
+    swayMult: 0.12,   // the actual reward — the reticle all but stops moving
+  },
+
   // Slow-motion third-person bullet cam (see core/KillCam.js).
   killcam: {
     // Only a wolf headshot or a dead-centre plate can earn the camera at
