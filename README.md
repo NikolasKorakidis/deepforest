@@ -78,26 +78,32 @@ not part of the running game — see the tree/lake design note below.
    distance to whatever is centred. Hold the matching BDC mark (mark 3 at
    300m, mark 7 at 700m, half-step ticks for 150m and 250m) and the shot
    lands on the plate. Under 100m the drop is small enough to ignore.
-5. **Hold your breath** — with the scope settled, hold **Shift**: the world
+5. **Start a run** — the post at the firing line, opposite the ammo crate,
+   starts a two-minute timed session. Every plate stands back up and every
+   balloon returns, the clock starts, and hits, shots and accuracy are all
+   measured. Clear the whole range before time and the seconds you saved
+   convert to points, so a run is a race rather than two minutes of
+   plinking. At the end you get a scorecard, and your best is kept.
+6. **Hold your breath** — with the scope settled, hold **Shift**: the world
    drops to 40% speed and the reticle all but stops wandering for five
    seconds. That's the window for the shot you couldn't otherwise take — a
    plate about to drop, or a balloon swinging on its tether. It then needs
    twenty seconds to recover, and letting go early doesn't bank any of it.
-6. **Read the wind** — the dial top-right shows wind *relative to where
+7. **Read the wind** — the dial top-right shows wind *relative to where
    you're looking*: straight up means it's blowing away from you, right
    means it will carry the bullet right. The windsocks down the lane say the
    same thing in the world. Under 200m wind is negligible; at 400m and 500m
    ignoring it is a clean miss.
-7. **Kill cam** — occasionally the world drops into slow motion and the
+8. **Kill cam** — occasionally the world drops into slow motion and the
    camera pulls off your shoulder to chase the round in. Only a wolf
    headshot or a plate struck dead centre can earn it, and even then only
    30% of the time (`CONFIG.killcam.chance`) — rare enough to stay a
    moment rather than a routine.
-8. **Score** — each plate is worth `10 + distance/10`, so the 500m plate pays
+9. **Score** — each plate is worth `10 + distance/10`, so the 500m plate pays
    about five times the 25m one. Dead centre doubles it. Chained hits build a multiplier up to x5;
    let six seconds lapse without a hit and it resets. Watch where your
    misses kick up dust — that's how you learn the hold.
-9. **The wilderness is still there** — gather wood (E at any tree), build a
+10. **The wilderness is still there** — gather wood (E at any tree), build a
    fire (T), cook and sleep at it, drink at the lake. Six wolves hold the
    water and the ridge above it; a headshot drops one instantly, a body shot
    wounds and slows it.
@@ -320,6 +326,14 @@ Design notes:
     puzzle. Verified end to end by integrating the real trajectory: every
     target from 25m to 500m lands inside its plate, and 100m–500m land
     within 2cm of plate centre.
+- The run clock also runs on real time, which is what stops focus being
+  free: slowing the world to 40% no longer buys you extra seconds, so a held
+  breath costs real clock and has to be spent on a shot worth taking.
+- Records track each category independently of the best-scoring run. Your
+  best accuracy and your longest hit almost never land on your highest
+  scoring run, so scoring them against that run's figures would flag
+  ordinary shots as records and genuine records as nothing. Accuracy also
+  needs a minimum shot count, or a two-shot run sets an unbeatable 100%.
 - Focus timers run on *real* time, not the scaled clock they themselves
   create. Measured on the slowed clock a "5 second" hold would silently last
   two and a half times longer than advertised, and the cooldown likewise —

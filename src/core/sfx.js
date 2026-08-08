@@ -95,6 +95,9 @@ export class SFX {
     osc.stop(t + 0.2);
   }
 
+  /** Run-clock countdown. Dry enough not to be mistaken for a hit. */
+  tick() { this._blip(880, 0.05, 0.11, 'triangle'); }
+
   dry() { this._blip(1100, 0.04, 0.15, 'square'); }
   pickup() { this._blip(660, 0.09, 0.2); this._blip(880, 0.09, 0.15, 'sine', 0.08); }
   eat() { this._blip(330, 0.1, 0.2); this._blip(280, 0.1, 0.2, 'sine', 0.14); }

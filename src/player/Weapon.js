@@ -62,6 +62,10 @@ export class Weapon {
     this.hasBinoculars = false;
     this.magAmmo = 0;
     this.reserveAmmo = 0;
+    // Every round that leaves the barrel, for accuracy scoring. A lifetime
+    // counter rather than a per-run one: the range snapshots it at the start
+    // of a session and diffs, so nothing here needs to know about sessions.
+    this.shotsFired = 0;
     this.cooldown = 0;
     this.reloadT = 0;
     this.shotT = 0; // keeps a fire animation from being interrupted by walk/idle
@@ -240,6 +244,7 @@ export class Weapon {
       return;
     }
     this.magAmmo--;
+    this.shotsFired++;
     this.cooldown = CONFIG.rifle.fireCooldown;
     this.flashT = 0.06;
     this.controller.addRecoil(0.032 + Math.random() * 0.012, (Math.random() - 0.5) * 0.012);

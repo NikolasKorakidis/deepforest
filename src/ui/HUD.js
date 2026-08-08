@@ -4,6 +4,7 @@
 
 import scopeReticleUrl from '../assets/textures/scope-reticle.svg?url';
 import binocMaskUrl from '../assets/textures/binoculars-mask.png?url';
+import { CONFIG } from '../core/config.js';
 
 const STAT_DEFS = [
   ['health', 'Health', '#c94f42'],
@@ -60,6 +61,16 @@ export class HUD {
 
       <canvas id="compass" width="300" height="34" class="hidden"></canvas>
       <div id="wind"><canvas id="wind-dial" width="96" height="96"></canvas><div id="wind-speed"></div></div>
+      <div id="session" class="hidden">
+        <div id="session-clock">2:00</div>
+        <div id="session-stats"></div>
+      </div>
+      <div id="scorecard" class="hidden"><div class="card">
+        <h3 id="sc-title">RUN COMPLETE</h3>
+        <div id="sc-score"></div>
+        <table id="sc-rows"></table>
+        <div id="sc-best"></div>
+      </div></div>
       <div id="score"><span id="score-value">0</span><span id="score-streak"></span></div>
       <div id="clock"></div>
       <div id="objective" class="hidden"></div>
@@ -85,7 +96,9 @@ export class HUD {
           <p class="story">The helicopter went down at first light. It's still burning.<br>
           West of the wreck someone cut a firing lane into the hillside —
           steel plates from 25 to 500 metres.<br>
-          Range them, read the wind, and see what you can hit.</p>
+          Range them, read the wind, and see what you can hit.<br>
+          The post at the firing line starts a timed run — everything resets,
+          two minutes on the clock, and your best is kept.</p>
           <div class="controls">
             <span><b>WASD</b> move</span><span><b>Shift</b> sprint / hold breath</span>
             <span><b>C / Ctrl</b> crouch</span><span><b>Z</b> prone</span>
@@ -94,7 +107,7 @@ export class HUD {
             <span><b>R</b> reload</span><span><b>1 / 2</b> rifle / binoculars</span>
             <span><b>F</b> eat ration</span><span><b>T</b> build campfire</span>
             <span><b>Wind</b> dial, top right</span><span><b>Scope</b> marks = 100m each</span>
-            <span><b>E</b> at fire: cook / sleep</span><span><b>Esc</b> pause</span>
+            <span><b>E</b> at the post: timed run</span><span><b>Esc</b> pause</span>
           </div>
           <p class="begin" id="begin-fresh">CLICK TO BEGIN</p>
           <div id="save-choice" class="hidden">
@@ -138,6 +151,7 @@ export class HUD {
     }
     this.compassCtx = this.el('compass').getContext('2d');
     this._toastCount = 0;
+    this._scorecardT = null;
     this._pauseResumeHandler = null;
 
     this.el('retry-btn').addEventListener('click', () => location.reload());
@@ -283,6 +297,65 @@ export class HUD {
     this.el('focus-label').textContent = holding
       ? 'HOLDING BREATH'
       : `RECOVERING  ${Math.ceil(focus.recovery)}s`;
+  }
+
+  // ------------------------------------------------------------- run clock
+  /** @param s null to hide, else { left, score, hits, shots }. */
+  setSession(s) {
+    const el = this.el('session');
+    el.classList.toggle('hidden', !s);
+    if (!s) return;
+    const secs = Math.max(0, s.left);
+    const mm = Math.floor(secs / 60);
+    const ss = Math.floor(secs % 60);
+    this.el('session-clock').textContent = `${mm}:${String(ss).padStart(2, '0')}`;
+    el.classList.toggle('urgent', secs <= 10);
+    const acc = s.shots > 0 ? Math.round((s.hits / s.shots) * 100) : 0;
+    this.el('session-stats').textContent =
+      `${s.score} pts   ·   ${s.hits}/${s.shots}   ·   ${acc}%`;
+  }
+
+  hideScorecard() {
+    clearTimeout(this._scorecardT);
+    this.el('scorecard').classList.add('hidden');
+  }
+
+  /**
+   * End-of-run summary. Auto-dismisses rather than waiting for a click:
+   * dismissing it would mean releasing the pointer lock, and dropping the
+   * player out of mouse-look to read their own score is a worse trade than
+   * simply letting it fade.
+   */
+  showScorecard(run, best, beaten) {
+    const el = this.el('scorecard');
+    this.el('sc-title').textContent = run.cleared ? 'RANGE CLEARED' : 'TIME';
+    this.el('sc-score').textContent = `${run.score}`;
+
+    const rows = [
+      ['Hits', `${run.hits} / ${run.shots}`],
+      ['Accuracy', `${Math.round(run.accuracy * 100)}%`, beaten.accuracy && run.shots > 0],
+      ['Best shot', run.bestShot ? `${run.bestShot} m` : '—', beaten.bestShot && run.bestShot > 0],
+      ['Longest streak', run.longestStreak > 1 ? `x${run.longestStreak}` : '—', beaten.longestStreak && run.longestStreak > 1],
+    ];
+    if (run.timeBonus) {
+      rows.push([`Time bonus (${Math.floor(run.secondsLeft)}s left)`, `+${run.timeBonus}`, true]);
+    }
+    this.el('sc-rows').innerHTML = rows.map(([k, v, hot]) =>
+      `<tr><td>${k}</td><td class="${hot ? 'hot' : ''}">${v}${hot ? ' ★' : ''}</td></tr>`
+    ).join('');
+
+    const bestEl = this.el('sc-best');
+    if (beaten.score) {
+      bestEl.className = 'record';
+      bestEl.textContent = best ? `NEW BEST — beat ${best.score}` : 'NEW BEST';
+    } else {
+      bestEl.className = '';
+      bestEl.textContent = `Best ${best.score}  ·  ${best.score - run.score} short`;
+    }
+
+    el.classList.remove('hidden');
+    clearTimeout(this._scorecardT);
+    this._scorecardT = setTimeout(() => el.classList.add('hidden'), CONFIG.session.scorecardMs);
   }
 
   // ---------------------------------------------------------------- score

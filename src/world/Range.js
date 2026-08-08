@@ -1,5 +1,7 @@
 import * as THREE from 'three';
+import { submitRun } from '../core/records.js';
 import { terrainHeight, RANGE, rangeTargetSpots } from './heightfield.js';
+import { CONFIG } from '../core/config.js';
 
 const _v = new THREE.Vector3(); // scratch, reused by centre()/isBullseye()
 
@@ -150,6 +152,15 @@ class Target {
     return point.distanceTo(this.centre(_v)) < this.size * 0.13;
   }
 
+  /** Back to standing-by, for a fresh session. The pivot is already flat, so
+   *  it simply pops up again when the stagger timer runs out. */
+  reset() {
+    this.knocked = false;
+    this.bullseye = false;
+    this.up = false;
+    this.timer = 0.5 + Math.random() * 5;
+  }
+
   hit(point) {
     if (!this.up || this.knocked) return; // edge-on, or already knocked down
     this.bullseye = point ? this.isBullseye(point) : false;
@@ -271,6 +282,18 @@ class Balloon {
     this.onPop = null;
   }
 
+  reset() {
+    this.popped = false;
+    this.popT = 0;
+    // pop() inflates and fades the mesh; both have to be undone, or a
+    // re-inflated balloon comes back invisible and twice the size.
+    this.balloon.scale.set(0.86, 1.12, 0.86);
+    this.balloon.material.opacity = 1;
+    this.balloon.material.transparent = false;
+    this.group.visible = true;
+    this.line.visible = true;
+  }
+
   pop() {
     if (this.popped) return;
     this.popped = true;
@@ -278,7 +301,28 @@ class Balloon {
     if (this.onPop) this.onPop(this);
   }
 
-  update(dt, wind) {
+  /** Credit a scoring hit to the live run, and end it if that cleared the
+   *  range. Called by both the plate and the balloon paths so neither has to
+   *  know whether a session is running. */
+  _recordShot(gained, dist) {
+    const cleared = this.remaining === 0;
+    const s = this.session;
+    if (!s) {
+      if (cleared) {
+        this.hud.toast(
+          `Range cleared — ${this.score} points. Start a timed run to reset it.`, 9000
+        );
+      }
+      return;
+    }
+    s.score += gained;
+    s.hits++;
+    s.bestShot = Math.max(s.bestShot, dist);
+    s.longestStreak = Math.max(s.longestStreak, this.streak);
+    if (cleared) this.endSession('cleared');
+  }
+
+  update(dt, wind, realDt = 0) {
     if (this.popped) {
       // Burst outward and vanish, rather than blinking out.
       this.popT += dt;
@@ -409,10 +453,65 @@ class Windsock {
   }
 }
 
+/**
+ * The post you start a timed run from, at the firing line beside the ammo
+ * crate. A lamp on top reads green when the range is cold and red while a
+ * run is live, so the range's state is legible from down the lane rather
+ * than only from the HUD.
+ */
+class RangeControl {
+  constructor(x, z, groundY) {
+    this.group = new THREE.Group();
+    this.group.position.set(x, groundY, z);
+    this.group.rotation.y = Math.PI; // face back toward the firing line
+
+    const postMat = new THREE.MeshStandardMaterial({ color: 0x4a4438, roughness: 0.9 });
+    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.09, 1.5, 8), postMat);
+    post.position.y = 0.75;
+    post.castShadow = true;
+    this.group.add(post);
+
+    const board = new THREE.Mesh(
+      new THREE.BoxGeometry(1.15, 0.58, 0.06),
+      new THREE.MeshStandardMaterial({ color: 0x1b1e22, roughness: 0.9 })
+    );
+    board.position.y = 1.45;
+    board.castShadow = true;
+    this.group.add(board);
+
+    for (const sz of [0.032, -0.032]) {
+      const face = new THREE.Mesh(
+        new THREE.PlaneGeometry(1.05, 0.5),
+        new THREE.MeshBasicMaterial({ map: makeLabelTexture('RUN'), toneMapped: false })
+      );
+      face.position.set(0, 1.45, sz);
+      if (sz < 0) face.rotation.y = Math.PI;
+      this.group.add(face);
+    }
+
+    this.lampMat = new THREE.MeshStandardMaterial({
+      color: 0x8fc94a, emissive: 0x8fc94a, emissiveIntensity: 1.4, roughness: 0.4,
+    });
+    const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.075, 10, 8), this.lampMat);
+    lamp.position.y = 1.82;
+    this.group.add(lamp);
+  }
+
+  setLive(live) {
+    this.lampMat.color.setHex(live ? 0xe2402c : 0x8fc94a);
+    this.lampMat.emissive.setHex(live ? 0xe2402c : 0x8fc94a);
+  }
+}
+
 export class Range {
   constructor({ scene, hud, sfx, interactions, weapon }) {
     this.hud = hud;
     this.sfx = sfx;
+    this.weapon = weapon;
+    // Null between runs. Free practice is always available; a session is an
+    // opt-in overlay on top of it that resets the range, starts a clock and
+    // measures you.
+    this.session = null;
     this.score = 0;
     this.hits = 0;
     this.streak = 0;
@@ -471,6 +570,25 @@ export class Range {
       });
     }
 
+    // Start post, mirroring the ammo crate on the other side of the line.
+    const postX = RANGE.laneX - 4.5;
+    const postZ = RANGE.firingZ + 4;
+    this.control = new RangeControl(postX, postZ, terrainHeight(postX, postZ));
+    scene.add(this.control.group);
+    if (interactions) {
+      this.controlEntry = interactions.add({
+        position: new THREE.Vector3(postX, terrainHeight(postX, postZ) + 0.9, postZ),
+        radius: 3.2,
+        label: `Start timed run (${CONFIG.session.seconds}s)`,
+        // The same post both starts and stops a run, so there is one place
+        // to go and no second control to find mid-session.
+        onUse: () => {
+          if (this.session) this.endSession('abandoned');
+          else this.startSession();
+        },
+      });
+    }
+
     // Alternating sides so there's one in view wherever you're pointed, and
     // set in from the corridor edge so they read against the lane rather
     // than against the treeline.
@@ -481,6 +599,81 @@ export class Range {
       scene.add(s.group);
       return s;
     });
+  }
+
+  /**
+   * Reset the range and start the clock.
+   *
+   * Everything stands back up — that is the point. Plates are one-shot by
+   * design, so without a reset the range is a resource you exhaust once and
+   * then have no reason to return to. A run turns the same twelve plates and
+   * five balloons into something you can attempt again and shoot better.
+   */
+  startSession() {
+    for (const t of this.targets) t.reset();
+    for (const b of this.balloons) b.reset();
+    this.streak = 0;
+    this.streakTimer = 0;
+
+    this.session = {
+      left: CONFIG.session.seconds,
+      score: 0,
+      hits: 0,
+      bestShot: 0,
+      longestStreak: 0,
+      // Snapshot rather than a counter of our own: the weapon already knows
+      // how many rounds it has fired, and a diff can't drift out of sync.
+      shotsAt: this.weapon ? this.weapon.shotsFired : 0,
+    };
+
+    this.control.setLive(true);
+    if (this.controlEntry) this.controlEntry.label = 'Abandon run';
+    this.hud.hideScorecard();
+    this.sfx.ding();
+    this.hud.toast(`Run started — ${CONFIG.session.seconds}s. Everything is up.`, 3200);
+  }
+
+  /** @param reason 'time' | 'cleared' | 'abandoned' */
+  endSession(reason) {
+    const s = this.session;
+    if (!s) return;
+    this.session = null;
+    this.control.setLive(false);
+    if (this.controlEntry) {
+      this.controlEntry.label = `Start timed run (${CONFIG.session.seconds}s)`;
+    }
+    this.hud.setSession(null);
+
+    if (reason === 'abandoned') {
+      this.hud.toast('Run abandoned.', 2600);
+      return;
+    }
+
+    // Clearing the range early banks the time you saved, so a run is a race
+    // rather than a fixed two minutes of plinking.
+    const timeBonus = reason === 'cleared'
+      ? Math.round(s.left * CONFIG.session.clearBonusPerSecond) : 0;
+    const shots = this.weapon ? this.weapon.shotsFired - s.shotsAt : 0;
+    const run = {
+      score: s.score + timeBonus,
+      hits: s.hits,
+      shots,
+      accuracy: shots > 0 ? s.hits / shots : 0,
+      bestShot: s.bestShot,
+      longestStreak: s.longestStreak,
+      cleared: reason === 'cleared',
+      timeBonus,
+      secondsLeft: Math.max(0, s.left),
+    };
+    // The career score keeps the bonus too — it was earned in the same run.
+    if (timeBonus) {
+      this.score += timeBonus;
+      this.hud.setScore(this.score, this.streak);
+    }
+
+    const { best, beaten } = submitRun(run);
+    this.sfx.ding();
+    this.hud.showScorecard(run, best, beaten);
   }
 
   get remaining() {
@@ -500,9 +693,7 @@ export class Range {
       1500
     );
     this.hud.setScore(this.score, this.streak);
-    if (this.remaining === 0) {
-      this.hud.toast(`Range cleared — ${this.score} points.`, 9000);
-    }
+    this._recordShot(gained, balloon.dist);
   }
 
   /** Which plates are already down, for the save. Without this the score
@@ -557,13 +748,31 @@ export class Range {
       1500
     );
     this.hud.setScore(this.score, this.streak);
-
-    if (this.remaining === 0) {
-      this.hud.toast(`Range cleared — ${this.score} points, ${this.hits} plates.`, 9000);
-    }
+    this._recordShot(gained, target.dist);
   }
 
-  update(dt, wind) {
+  /** Credit a scoring hit to the live run, and end it if that cleared the
+   *  range. Called by both the plate and the balloon paths so neither has to
+   *  know whether a session is running. */
+  _recordShot(gained, dist) {
+    const cleared = this.remaining === 0;
+    const s = this.session;
+    if (!s) {
+      if (cleared) {
+        this.hud.toast(
+          `Range cleared — ${this.score} points. Start a timed run to reset it.`, 9000
+        );
+      }
+      return;
+    }
+    s.score += gained;
+    s.hits++;
+    s.bestShot = Math.max(s.bestShot, dist);
+    s.longestStreak = Math.max(s.longestStreak, this.streak);
+    if (cleared) this.endSession('cleared');
+  }
+
+  update(dt, wind, realDt = 0) {
     for (const t of this.targets) t.update(dt);
     for (const b of this.balloons) b.update(dt, wind);
     if (wind) for (const s of this.socks) s.update(wind);
@@ -574,6 +783,20 @@ export class Range {
         this.streak = 0;
         this.hud.setScore(this.score, 0);
       }
+    }
+
+    // Real time, not the scaled clock: holding your breath must not buy you
+    // extra seconds, or the optimal run is one long stretch of slow motion.
+    const s = this.session;
+    if (s && realDt > 0) {
+      const was = s.left;
+      s.left -= realDt;
+      // Last ten seconds get a tick, so the clock is audible while you're
+      // looking down a scope at something 500m away.
+      if (Math.ceil(s.left) !== Math.ceil(was) && s.left > 0 && s.left <= 10) this.sfx.tick();
+      if (s.left <= 0) { this.endSession('time'); return; }
+      const shots = this.weapon ? this.weapon.shotsFired - s.shotsAt : 0;
+      this.hud.setSession({ left: s.left, score: s.score, hits: s.hits, shots });
     }
   }
 }

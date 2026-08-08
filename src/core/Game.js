@@ -243,7 +243,8 @@ export class Game {
     // living world behind it rather than a freeze-frame.
     this.wind.update(dt);
     this.level.update(dt, this.env, this.controller.position);
-    this.range.update(dt, this.wind);
+    // The run clock is paused with the game but never scaled by focus.
+    this.range.update(dt, this.wind, this.state === 'playing' ? real : 0);
     updateVegetation(dt, this.camera.position, this.wind);
     // After every other camera write, so nothing fights it for control.
     this.killcam.update(real);

@@ -111,6 +111,15 @@ export const CONFIG = {
     },
   },
 
+  // Timed range session (see world/Range.js). Seconds are real seconds: the
+  // clock keeps running while focus slows the world, so slow motion costs
+  // you something instead of being free.
+  session: {
+    seconds: 120,
+    clearBonusPerSecond: 25, // clearing the range early banks the time left
+    scorecardMs: 12000,
+  },
+
   // Hold-breath focus (see player/Focus.js). Seconds are real seconds.
   focus: {
     holdSeconds: 5,
