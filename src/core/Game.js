@@ -91,6 +91,8 @@ export class Game {
       getWorld: () => this.scene,
       getWind: () => this.wind,
       getFocus: () => this.focus,
+      // Plates and balloons both, so a missed balloon gets called too.
+      getTargets: () => (this.range ? [...this.range.targets, ...this.range.balloons] : []),
     });
     this.campfires = new CampfireSystem(
       this.scene, this.sfx, this.interactions,

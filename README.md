@@ -83,27 +83,33 @@ not part of the running game — see the tree/lake design note below.
    balloon returns, the clock starts, and hits, shots and accuracy are all
    measured. Clear the whole range before time and the seconds you saved
    convert to points, so a run is a race rather than two minutes of
-   plinking. At the end you get a scorecard, and your best is kept.
-6. **Hold your breath** — with the scope settled, hold **Shift**: the world
+   plinking. At the end you get a scorecard, and your best is kept. Six
+   medals name different ways to shoot well — some of which deliberately
+   pull against each other, so no single run can collect them all.
+6. **Listen to the spotter** — miss a plate past 60m and the call comes back
+   under the reticle: `1.2m LOW   0.8m RIGHT`, or `48m SHORT` if the round
+   buried itself in front. It reports the miss, not the correction, the way a
+   real spotter does — inverting it is the part worth learning.
+7. **Hold your breath** — with the scope settled, hold **Shift**: the world
    drops to 40% speed and the reticle all but stops wandering for five
    seconds. That's the window for the shot you couldn't otherwise take — a
    plate about to drop, or a balloon swinging on its tether. It then needs
    twenty seconds to recover, and letting go early doesn't bank any of it.
-7. **Read the wind** — the dial top-right shows wind *relative to where
+8. **Read the wind** — the dial top-right shows wind *relative to where
    you're looking*: straight up means it's blowing away from you, right
    means it will carry the bullet right. The windsocks down the lane say the
    same thing in the world. Under 200m wind is negligible; at 400m and 500m
    ignoring it is a clean miss.
-8. **Kill cam** — occasionally the world drops into slow motion and the
+9. **Kill cam** — occasionally the world drops into slow motion and the
    camera pulls off your shoulder to chase the round in. Only a wolf
    headshot or a plate struck dead centre can earn it, and even then only
    30% of the time (`CONFIG.killcam.chance`) — rare enough to stay a
    moment rather than a routine.
-9. **Score** — each plate is worth `10 + distance/10`, so the 500m plate pays
+10. **Score** — each plate is worth `10 + distance/10`, so the 500m plate pays
    about five times the 25m one. Dead centre doubles it. Chained hits build a multiplier up to x5;
    let six seconds lapse without a hit and it resets. Watch where your
    misses kick up dust — that's how you learn the hold.
-10. **The wilderness is still there** — gather wood (E at any tree), build a
+11. **The wilderness is still there** — gather wood (E at any tree), build a
    fire (T), cook and sleep at it, drink at the lake. Six wolves hold the
    water and the ridge above it; a headshot drops one instantly, a body shot
    wounds and slows it.
@@ -326,6 +332,16 @@ Design notes:
     puzzle. Verified end to end by integrating the real trajectory: every
     target from 25m to 500m lands inside its plate, and 100m–500m land
     within 2cm of plate centre.
+- The spotter picks which target you meant by **azimuth alone**, ignoring
+  elevation. The obvious test — nearest target to the aim ray in 3D — is
+  quietly wrong, because a correct hold isn't pointed at the plate: with this
+  gravity a 700m shot is held 44m high, so the shots that most need grading
+  are exactly the ones that test rejects hardest. Verified against analytic
+  drop and drift: a flat hold at 400m is called at 14.34m low against a
+  predicted 14.34m, and the call is identical at 30fps and 144fps.
+- A round that falls short never crosses the target's plane, so the worst
+  misses would silently get no feedback at all. `fellShort` exists solely to
+  catch that case, and it's the call players will see most while learning.
 - The run clock also runs on real time, which is what stops focus being
   free: slowing the world to 40% no longer buys you extra seconds, so a held
   breath costs real clock and has to be spent on a shot worth taking.

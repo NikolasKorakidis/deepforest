@@ -5,11 +5,18 @@
 // are down — but should never wipe the best you've ever shot, or the number
 // stops meaning anything the moment you want a fresh start.
 
+import { MEDALS } from './medals.js';
+
 const KEY = 'deepforest-best';
 
 // An accuracy record off a two-shot run would be 100% forever and could never
 // be beaten honestly, so a run has to be long enough to mean something.
 const MIN_SHOTS_FOR_ACCURACY = 8;
+
+/** Ids of every medal earned so far. */
+export function loadMedals() {
+  return new Set(loadBest()?.medals ?? []);
+}
 
 export function loadBest() {
   try {
@@ -35,6 +42,12 @@ export function submitRun(run) {
   const stored = loadBest();
   const prevRun = stored?.run ?? null;
   const prevRecords = stored?.records ?? { accuracy: 0, bestShot: 0, longestStreak: 0 };
+  const held = new Set(stored?.medals ?? []);
+
+  // Only ones not already held — a medal is a first time, so re-earning it
+  // shouldn't announce itself again on every subsequent run.
+  const newMedals = MEDALS.filter((m) => !held.has(m.id) && m.won(run));
+  for (const m of newMedals) held.add(m.id);
 
   const accuracyEligible = run.shots >= MIN_SHOTS_FOR_ACCURACY;
   const beaten = {
@@ -53,10 +66,11 @@ export function submitRun(run) {
         bestShot: Math.max(prevRecords.bestShot, run.bestShot),
         longestStreak: Math.max(prevRecords.longestStreak, run.longestStreak),
       },
+      medals: [...held],
     }));
   } catch (err) {
     console.error('Failed to save personal best:', err);
   }
 
-  return { best: prevRun, beaten };
+  return { best: prevRun, beaten, newMedals, medalCount: held.size };
 }

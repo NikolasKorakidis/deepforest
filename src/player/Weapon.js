@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
 import { CONFIG } from '../core/config.js';
+import { Spotter, formatCall } from './Spotter.js';
 import { makeGlowSprite } from '../core/glow.js';
 import { makeSparkSprite, makeSmokeSprite } from '../core/particleTextures.js';
 import { loadGLTF, normalizeModel } from '../core/assets.js';
@@ -47,7 +48,7 @@ const HIP_POS = new THREE.Vector3(-0.075, -0.21, -0.055);
 const AIM_POS = new THREE.Vector3(0.055, -0.26, -0.025);
 
 export class Weapon {
-  constructor({ camera, input, controller, hud, sfx, getWorld, getWind, getFocus }) {
+  constructor({ camera, input, controller, hud, sfx, getWorld, getWind, getFocus, getTargets }) {
     this.camera = camera;
     this.input = input;
     this.controller = controller;
@@ -56,6 +57,8 @@ export class Weapon {
     this.getWorld = getWorld;
     this.getWind = getWind; // shared Wind instance; see _updateBullets
     this.getFocus = getFocus; // hold-breath state; steadies the sway below
+    // Grades misses against whatever the shot was aimed at (see Spotter.js).
+    this.spotter = new Spotter({ getTargets });
 
     this.equipped = null; // 'rifle' | 'binoculars' | null
     this.hasRifle = false;
@@ -264,11 +267,16 @@ export class Weapon {
     this.camera.getWorldDirection(dir);
     const muzzlePos = new THREE.Vector3();
     this.camera.getWorldPosition(muzzlePos);
+    // Worked out here, while `dir` is still a unit vector and before the
+    // world has had a chance to move: the spotter grades against the target
+    // as it stood at the trigger.
+    const spot = this.spotter.planFor(muzzlePos, dir, CONFIG.rifle.muzzleVelocity, this.getWind?.());
     const bullet = {
       pos: muzzlePos,
       vel: dir.multiplyScalar(CONFIG.rifle.muzzleVelocity),
       life: CONFIG.rifle.bulletLifetime,
       resolved: false,
+      spot,
     };
     this.bullets.push(bullet);
 
@@ -409,6 +417,7 @@ export class Weapon {
         if (obj && obj.userData.onShot) {
           obj.userData.onShot(hit.point);
           this.hud.hitmarker();
+          b.spot = null; // it connected; there's nothing to call
         } else if (obj && obj.userData.wolfRef) {
           const wolf = obj.userData.wolfRef;
           // Headshots always drop a wolf outright, regardless of remaining
@@ -418,13 +427,21 @@ export class Weapon {
           wolf.takeDamage(wolf.isHeadshot(hit.point) ? Infinity : 1, segment);
           this.hud.hitmarker();
         }
+        // Graded against where the round actually stopped, not where the
+        // step would have carried it: a shot that buried itself in the mound
+        // 40m short must read as short, not as a crossing it never made.
+        this._spotShot(b, prevPos, hit.point, true);
         this._spawnImpact(hit.point);
         // Flagged before removal: the kill cam holds a reference to this
         // bullet and watches it to know when the flight is over.
         b.impact = hit.point.clone();
         b.resolved = true;
         this.bullets.splice(i, 1);
-      } else if (b.life <= 0) {
+      } else {
+        this._spotShot(b, prevPos, b.pos, false);
+      }
+
+      if (b.life <= 0 && !b.resolved) {
         // Expired without hitting anything — still "resolved", or a kill cam
         // following a shot that sails into the sky would never end.
         b.impact = b.pos.clone();
@@ -432,6 +449,26 @@ export class Weapon {
         this.bullets.splice(i, 1);
       }
     }
+  }
+
+  /**
+   * Grade one step of a round's flight against the target it was aimed at.
+   *
+   * @param stopped true when `endPos` is where the round actually died, which
+   *   is what distinguishes "hasn't got there yet" from "never will".
+   */
+  _spotShot(b, prevPos, endPos, stopped) {
+    if (!b.spot) return;
+    const call = this.spotter.crossing(b.spot, prevPos, endPos);
+    if (call) {
+      this.hud.spotterCall(formatCall(call), call.dist);
+      b.spot = null;
+      return;
+    }
+    if (!stopped) return; // still in the air; it may yet get there
+    const short = this.spotter.fellShort(b.spot, endPos);
+    if (short) this.hud.spotterCall(formatCall(short), short.dist);
+    b.spot = null;
   }
 
   /**

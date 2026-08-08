@@ -152,6 +152,20 @@ class Target {
     return point.distanceTo(this.centre(_v)) < this.size * 0.13;
   }
 
+  /** What the spotter needs to grade a shot against this plate. The centre
+   *  is a fresh vector, not the shared scratch one `centre()` defaults to:
+   *  the spotter holds onto the best candidate while it goes on to test the
+   *  rest, and a shared vector would have it grading against whichever
+   *  target happened to be examined last. */
+  spotterInfo() {
+    return {
+      live: this.up && !this.knocked,
+      centre: this.centre(new THREE.Vector3()),
+      half: this.size * 0.5,
+      dist: this.dist,
+    };
+  }
+
   /** Back to standing-by, for a fresh session. The pivot is already flat, so
    *  it simply pops up again when the stagger timer runs out. */
   reset() {
@@ -282,6 +296,15 @@ class Balloon {
     this.onPop = null;
   }
 
+  spotterInfo() {
+    return {
+      live: !this.popped,
+      centre: this.group.position.clone(),
+      half: this.radius,
+      dist: this.dist,
+    };
+  }
+
   reset() {
     this.popped = false;
     this.popT = 0;
@@ -304,7 +327,7 @@ class Balloon {
   /** Credit a scoring hit to the live run, and end it if that cleared the
    *  range. Called by both the plate and the balloon paths so neither has to
    *  know whether a session is running. */
-  _recordShot(gained, dist) {
+  _recordShot(gained, dist, bull = false) {
     const cleared = this.remaining === 0;
     const s = this.session;
     if (!s) {
@@ -319,6 +342,7 @@ class Balloon {
     s.hits++;
     s.bestShot = Math.max(s.bestShot, dist);
     s.longestStreak = Math.max(s.longestStreak, this.streak);
+    if (bull) s.bulls++;
     if (cleared) this.endSession('cleared');
   }
 
@@ -621,6 +645,7 @@ export class Range {
       hits: 0,
       bestShot: 0,
       longestStreak: 0,
+      bulls: 0,
       // Snapshot rather than a counter of our own: the weapon already knows
       // how many rounds it has fired, and a diff can't drift out of sync.
       shotsAt: this.weapon ? this.weapon.shotsFired : 0,
@@ -661,6 +686,7 @@ export class Range {
       accuracy: shots > 0 ? s.hits / shots : 0,
       bestShot: s.bestShot,
       longestStreak: s.longestStreak,
+      bulls: s.bulls,
       cleared: reason === 'cleared',
       timeBonus,
       secondsLeft: Math.max(0, s.left),
@@ -671,9 +697,9 @@ export class Range {
       this.hud.setScore(this.score, this.streak);
     }
 
-    const { best, beaten } = submitRun(run);
+    const { best, beaten, newMedals, medalCount } = submitRun(run);
     this.sfx.ding();
-    this.hud.showScorecard(run, best, beaten);
+    this.hud.showScorecard(run, best, beaten, newMedals, medalCount);
   }
 
   get remaining() {
@@ -748,13 +774,13 @@ export class Range {
       1500
     );
     this.hud.setScore(this.score, this.streak);
-    this._recordShot(gained, target.dist);
+    this._recordShot(gained, target.dist, target.bullseye);
   }
 
   /** Credit a scoring hit to the live run, and end it if that cleared the
    *  range. Called by both the plate and the balloon paths so neither has to
    *  know whether a session is running. */
-  _recordShot(gained, dist) {
+  _recordShot(gained, dist, bull = false) {
     const cleared = this.remaining === 0;
     const s = this.session;
     if (!s) {
@@ -769,6 +795,7 @@ export class Range {
     s.hits++;
     s.bestShot = Math.max(s.bestShot, dist);
     s.longestStreak = Math.max(s.longestStreak, this.streak);
+    if (bull) s.bulls++;
     if (cleared) this.endSession('cleared');
   }
 

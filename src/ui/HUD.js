@@ -5,6 +5,7 @@
 import scopeReticleUrl from '../assets/textures/scope-reticle.svg?url';
 import binocMaskUrl from '../assets/textures/binoculars-mask.png?url';
 import { CONFIG } from '../core/config.js';
+import { MEDALS } from '../core/medals.js';
 
 const STAT_DEFS = [
   ['health', 'Health', '#c94f42'],
@@ -61,6 +62,7 @@ export class HUD {
 
       <canvas id="compass" width="300" height="34" class="hidden"></canvas>
       <div id="wind"><canvas id="wind-dial" width="96" height="96"></canvas><div id="wind-speed"></div></div>
+      <div id="spotter"><span id="spotter-range"></span><span id="spotter-call"></span></div>
       <div id="session" class="hidden">
         <div id="session-clock">2:00</div>
         <div id="session-stats"></div>
@@ -69,6 +71,7 @@ export class HUD {
         <h3 id="sc-title">RUN COMPLETE</h3>
         <div id="sc-score"></div>
         <table id="sc-rows"></table>
+        <div id="sc-medals"></div>
         <div id="sc-best"></div>
       </div></div>
       <div id="score"><span id="score-value">0</span><span id="score-streak"></span></div>
@@ -98,7 +101,8 @@ export class HUD {
           steel plates from 25 to 500 metres.<br>
           Range them, read the wind, and see what you can hit.<br>
           The post at the firing line starts a timed run — everything resets,
-          two minutes on the clock, and your best is kept.</p>
+          two minutes on the clock, and your best is kept. Miss, and the
+          spotter calls the correction.</p>
           <div class="controls">
             <span><b>WASD</b> move</span><span><b>Shift</b> sprint / hold breath</span>
             <span><b>C / Ctrl</b> crouch</span><span><b>Z</b> prone</span>
@@ -152,6 +156,7 @@ export class HUD {
     this.compassCtx = this.el('compass').getContext('2d');
     this._toastCount = 0;
     this._scorecardT = null;
+    this._spotterT = null;
     this._pauseResumeHandler = null;
 
     this.el('retry-btn').addEventListener('click', () => location.reload());
@@ -299,6 +304,22 @@ export class HUD {
       : `RECOVERING  ${Math.ceil(focus.recovery)}s`;
   }
 
+  // --------------------------------------------------------------- spotter
+  /** A called miss, e.g. ("1.2m LOW   0.8m RIGHT", 400). Stays up long enough
+   *  to act on and no longer — the correction is for the *next* shot. */
+  spotterCall(text, dist) {
+    const el = this.el('spotter');
+    this.el('spotter-range').textContent = `${dist}m`;
+    this.el('spotter-call').textContent = text;
+    // Restart the animation even if a call is already showing: rapid fire
+    // would otherwise leave the first call's timer governing the last one.
+    el.classList.remove('active');
+    void el.offsetWidth;
+    el.classList.add('active');
+    clearTimeout(this._spotterT);
+    this._spotterT = setTimeout(() => el.classList.remove('active'), 3600);
+  }
+
   // ------------------------------------------------------------- run clock
   /** @param s null to hide, else { left, score, hits, shots }. */
   setSession(s) {
@@ -326,7 +347,7 @@ export class HUD {
    * player out of mouse-look to read their own score is a worse trade than
    * simply letting it fade.
    */
-  showScorecard(run, best, beaten) {
+  showScorecard(run, best, beaten, newMedals = [], medalCount = 0) {
     const el = this.el('scorecard');
     this.el('sc-title').textContent = run.cleared ? 'RANGE CLEARED' : 'TIME';
     this.el('sc-score').textContent = `${run.score}`;
@@ -344,6 +365,14 @@ export class HUD {
       `<tr><td>${k}</td><td class="${hot ? 'hot' : ''}">${v}${hot ? ' ★' : ''}</td></tr>`
     ).join('');
 
+    // Medals are the run's headline when there are any — a first 700m hit
+    // matters more to a player than the points it happened to be worth.
+    this.el('sc-medals').innerHTML = newMedals.length
+      ? newMedals.map((m) =>
+          `<div class="medal"><b>${m.name}</b><span>${m.desc}</span></div>`).join('')
+      : '';
+    this.el('sc-medals').classList.toggle('empty', newMedals.length === 0);
+
     const bestEl = this.el('sc-best');
     if (beaten.score) {
       bestEl.className = 'record';
@@ -352,6 +381,7 @@ export class HUD {
       bestEl.className = '';
       bestEl.textContent = `Best ${best.score}  ·  ${best.score - run.score} short`;
     }
+    bestEl.textContent += `   ·   Medals ${medalCount}/${MEDALS.length}`;
 
     el.classList.remove('hidden');
     clearTimeout(this._scorecardT);
