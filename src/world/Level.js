@@ -1,44 +1,48 @@
 import * as THREE from 'three';
 import {
-  terrainHeight, pathX, hash2, POND, POND_RADIUS, POND_WATER_Y, CHECKPOINT,
+  terrainHeight, hash2, smoothstep, POND, POND_RADIUS, POND_WATER_Y, CHECKPOINT,
 } from './heightfield.js';
+import { CONFIG } from '../core/config.js';
 import { makeGlowSprite } from '../core/glow.js';
-import { makeSmokeSprite, makeSparkSprite } from '../core/particleTextures.js';
+import { makeSmokeSprite } from '../core/particleTextures.js';
 import { loadGLTF, normalizeModel } from '../core/assets.js';
 import { loadTreeAssets } from './TreeAssets.js';
-import { createWaterMaterial, updateWaterMaterial } from './Water.js';
+import { wolfSpawnPoints } from '../entities/Wolf.js';
+import { createWaterSurface, updateWaterSurface, createShoreBlend } from './Water.js';
+import { FireEffect } from './Fire.js';
 import helicopterUrl from '../assets/models/helicopter_crashed.glb?url';
 import rifleUrl from '../assets/models/rifle.glb?url';
+import binocularsUrl from '../assets/models/binoculars.glb?url';
 import woodPileUrl from '../assets/models/wood_pile.glb?url';
 
 const BASE_LAKE_TREE_HEIGHT = 7; // slightly taller than the ambient forest for a set-piece feel
 
-// Placement of the crashed helicopter model in the crash clearing.
+// The quest chain was removed: the game is the shooting range now, and a
+// survival objective list pulling the player away from it was working
+// against that. Everything the quests used to gate — the loot, the fire,
+// the lake — is still here and still works, it just isn't scripted.
+
+// The crashed helicopter sits in the spawn clearing — the one hand-placed
+// landmark in an otherwise fully procedural world, and the reason the
+// player is out here at all.
 const HELICOPTER = {
-  x: -2, z: -2,
+  x: -3, z: 3,
   size: 11,        // target longest bounding-box dimension, world units
-  yaw: 0.5,        // facing, radians
+  yaw: 0.9,        // facing, radians
   tiltX: 0.06,     // came down hard, resting crooked
   tiltZ: 0.12,
   yOffset: 0,      // manual ground clearance tweak after normalization
 };
 
-// A second piece of wreckage, torn off in the crash and thrown clear up
-// the valley — between the crash site and the lake. This is where the
-// rifle and its ammo ended up; finding it is the "look for survivors"
-// quest beat (see _buildWreckage / _completeSurvivorsQuest).
-const WRECKAGE = { x: pathX(-34) - 7, z: -34 };
-
-// Hand-placed level content: the helicopter wreck and starting loadout at
-// the crash clearing, wood/loot along the path, the pond, and the
-// "to be continued" checkpoint at the end of the valley.
+// Hand-placed content on top of the procedural wilderness: the crash site
+// and starting loadout in the spawn clearing, firewood scattered through
+// the woods, the lake, and the ridge overlook that ends the slice.
 
 export class Level {
   /** @param takenPickups Set of pickup ids to skip entirely (restoring a save
    *   — those items were already collected in a previous session).
-   *  @param onQuestAdvance(stage) called right after questStage changes —
-   *   Game.js uses this to autosave at each quest beat. */
-  constructor({ scene, grid, interactions, inventory, weapon, stats, hud, sfx, takenPickups, onQuestAdvance }) {
+   */
+  constructor({ scene, grid, interactions, inventory, weapon, stats, hud, sfx, takenPickups, firewoodSpots, treeSpots }) {
     this.scene = scene;
     this.grid = grid;
     this.interactions = interactions;
@@ -48,30 +52,24 @@ export class Level {
     this.hud = hud;
     this.sfx = sfx;
     this.takenPickups = takenPickups || new Set();
-    this.onQuestAdvance = onQuestAdvance || (() => {});
+    this.firewoodSpots = firewoodSpots || [];
+    this.treeSpots = treeSpots || [];
 
     this.t = 0;
     this.pickupSprites = [];
     this.smoke = [];
+    this.wreckFiresOut = false; // set once the crash fire has burned itself out
 
-    // Quest chain: 1 find survivors -> 2 build a campfire -> 3 sleep -> 4 done.
-    // Each _completeX/notifyX advances the stage and stages the next
-    // objective text a few seconds later so the player has time to read
-    // the completion line before it's replaced.
-    this.questStage = 1;
 
     this._buildHelicopter();
     this._placeStartingLoadout();
-    this._buildWreckage();
-    this._buildBeacon();
     this._placeWood();
+    this._placeTreeHarvesting();
     this._buildPond();
-    this._buildSupplyCrate();
-    this._buildSigns();
     this._buildCheckpoint();
 
-    // No wolves on this map — it's a quiet, unsettling valley, not a hunt.
-    this.wolfSpawns = [];
+    // Wolf territory is the lake — see Wolf.js's wolfSpawnPoints for why.
+    this.wolfSpawns = wolfSpawnPoints(POND);
     this.checkpoint = new THREE.Vector3(
       CHECKPOINT.x, terrainHeight(CHECKPOINT.x, CHECKPOINT.z), CHECKPOINT.z
     );
@@ -122,7 +120,7 @@ export class Level {
         // Placeholder stays as a graceful fallback.
       });
 
-    // Smoke rising from the wreck (synchronous).
+    // Smoke still rising from the wreck (synchronous).
     for (let i = 0; i < 10; i++) {
       const s = makeSmokeSprite(0x2a2a2a, 1.7, 0.28);
       s.userData.phase = i / 10;
@@ -134,23 +132,38 @@ export class Level {
     this.smokeX = hx + 0.4;
     this.smokeZ = hz;
 
-    this._buildFlare(hx, hz, groundY);
+    // The wreck is actually on fire, rather than just smoking under a red
+    // light as it used to be. Three separate seats of fire instead of one
+    // big column: a burning wreck reads as several things alight at once,
+    // and offsetting them across the fuselage gives the flames something
+    // to silhouette against from any approach. Only the main one carries a
+    // strong light — three bright point lights on one prop would flatten it
+    // and cost three shadowless lights for no visual gain.
+    this.wreckFires = [
+      { dx: 1.4, dz: -0.6, radius: 0.8, height: 2.4, flames: 7, embers: 9, intensity: 6.5, dist: 42 },
+      { dx: -2.2, dz: 1.1, radius: 0.45, height: 1.5, flames: 3, embers: 3, intensity: 0, dist: 0 },
+      { dx: 2.9, dz: 1.7, radius: 0.36, height: 1.2, flames: 3, embers: 3, intensity: 0, dist: 0 },
+    ].map((f, i) => {
+      const fx = hx + f.dx, fz = hz + f.dz;
+      const effect = new FireEffect({
+        radius: f.radius,
+        height: f.height,
+        flames: f.flames,
+        embers: f.embers,
+        lightColor: 0xff8433,
+        lightIntensity: f.intensity,
+        lightDistance: f.dist,
+        seed: i * 3.7 + 1,
+      });
+      effect.group.position.set(fx, this._groundY(fx, fz) + 0.15, fz);
+      this.scene.add(effect.group);
+      return effect;
+    });
 
     // Collision footprint (independent of the mesh — always present).
     this.grid.insert(hx, hz, 2.4);
     this.grid.insert(hx - 3.5, hz + 0.8, 1.2);
     this.grid.insert(hx + 2.2, hz - 1.2, 1.4);
-  }
-
-  /** Just the light a flare would throw — no visible prop. Illuminates the
-   *  crash clearing and rakes up the fuselage without an object to tune/
-   *  clutter the scene up close. */
-  _buildFlare(hx, hz, groundY) {
-    const fx = hx + 2.6, fz = hz + 1.4; // a few units clear of the fuselage
-    const fy = this._groundY(fx, fz);
-    this.flareLight = new THREE.PointLight(0xff2010, 6, 45, 1.8);
-    this.flareLight.position.set(fx, fy + 1.2, fz);
-    this.scene.add(this.flareLight);
   }
 
   // --------------------------------------------------------------- pickups
@@ -174,8 +187,8 @@ export class Level {
       label,
       onUse: (entry) => {
         // Marked taken before onTake() runs: onTake can synchronously
-        // advance the quest (e.g. the rifle), which autosaves — the save
-        // must already see this pickup as collected.
+        // advance the quest, which autosaves — the save must already see
+        // this pickup as collected.
         if (id) this.takenPickups.add(id);
         onTake();
         this.sfx.pickup();
@@ -199,337 +212,203 @@ export class Level {
     return g;
   }
 
-  // Only the compass and binoculars start at the crash site — no weapon
-  // here. The rifle and ammo are further up the valley at the wreckage
-  // (see _buildWreckage), which doubles as the "look for survivors" quest
-  // objective.
+  /** Same GLB as the held viewmodel, lying in the grass at pickup scale. */
+  _makeBinocularsProp() {
+    const g = new THREE.Group();
+    g.rotation.y = -0.6; // dropped at an angle, not squared up to the world
+    loadGLTF(binocularsUrl)
+      .then((gltf) => {
+        // normalizeModel grounds it, so it rests on the terrain rather than
+        // hovering at the default pickup offset.
+        g.add(normalizeModel(gltf.scene.clone(true), 0.3));
+      })
+      .catch((err) => console.error('Failed to load binoculars pickup model:', err));
+    return g;
+  }
+
+  /** Everything salvageable from the crash, scattered around the wreck. */
   _placeStartingLoadout() {
     const inv = this.inventory;
     const hud = this.hud;
+
+    this._addPickup(
+      this._makeRifleProp(), 2.6, 4.4,
+      'Take hunting rifle and magazines',
+      () => {
+        inv.hasRifle = true;
+        this.weapon.giveRifle();
+        this.weapon.addAmmo(10); // spare mags come with it — one pickup, one item
+        hud.toast('Rifle equipped — LMB fire, RMB aim, R reload, 1 to holster.');
+      },
+      { id: 'rifle' }
+    );
 
     const compass = new THREE.Mesh(
       new THREE.CylinderGeometry(0.12, 0.12, 0.05, 12),
       new THREE.MeshStandardMaterial({ color: 0xb8952f, roughness: 0.4, metalness: 0.7 })
     );
-    this._addPickup(compass, -1.4, 3.2, 'Take compass', () => {
+    this._addPickup(compass, -1.4, 5.2, 'Take compass', () => {
       inv.hasCompass = true;
-      hud.toast('Compass acquired. The valley runs north — follow it.');
+      hud.toast('Compass acquired. Get your bearings.');
     }, { id: 'compass' });
 
-    const binoc = new THREE.Group();
-    const tubeMat = new THREE.MeshStandardMaterial({ color: 0x1e1f22, roughness: 0.6 });
-    for (const off of [-0.06, 0.06]) {
-      const tube = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.06, 0.18, 8), tubeMat);
-      tube.position.x = off;
-      binoc.add(tube);
-    }
-    this._addPickup(binoc, -3.2, -0.4, 'Take binoculars', () => {
+    this._addPickup(this._makeBinocularsProp(), -5.2, 1.4, 'Take binoculars', () => {
       inv.hasBinoculars = true;
       this.weapon.giveBinoculars();
-      hud.toast('Binoculars acquired — press 2, hold RMB to scan ahead.');
-    }, { id: 'binoculars' });
+      hud.toast('Binoculars acquired — press 2, RMB to scan ahead.');
+    }, { id: 'binoculars', yOffset: 0.02 });
 
     const rationBox = new THREE.Mesh(
       new THREE.BoxGeometry(0.35, 0.22, 0.25),
       new THREE.MeshStandardMaterial({ color: 0x7a2e22, roughness: 0.8 })
     );
-    this._addPickup(rationBox, 0.9, 3.9, 'Take ration pack (+3 rations)', () => {
+    this._addPickup(rationBox, 0.9, 6.2, 'Take ration pack (+3 rations)', () => {
       inv.rations += 3;
       hud.toast('Rations stowed. Press F to eat one.');
     }, { id: 'rations' });
   }
 
-  // ---------------------------------------------------------- wreckage
-  /** A torn-off section of fuselage thrown clear in the crash, found further
-   *  up the valley between the crash site and the lake — cold and quiet,
-   *  unlike the still-burning helicopter. The rifle and its ammo ended up
-   *  here; finding it is the payoff for the "look for survivors" objective:
-   *  no one made it this far either, just their gear. */
-  _buildWreckage() {
-    const x = WRECKAGE.x, z = WRECKAGE.z;
-    const y = this._groundY(x, z);
-    const metalMat = new THREE.MeshStandardMaterial({ color: 0x4a4d4f, roughness: 0.7, metalness: 0.6 });
-    const scorchMat = new THREE.MeshStandardMaterial({ color: 0x1c1815, roughness: 1 });
 
-    const scorch = new THREE.Mesh(new THREE.CircleGeometry(2.6, 20), scorchMat);
-    scorch.rotation.x = -Math.PI / 2;
-    scorch.position.set(x, y + 0.03, z);
-    scorch.receiveShadow = true;
-    this.scene.add(scorch);
-
-    const g = new THREE.Group();
-    g.position.set(x, y, z);
-
-    const panel = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.9, 0.06), metalMat);
-    panel.position.set(0, 0.5, 0);
-    panel.rotation.set(0.3, 0.6, 0.5); // buckled, half-buried
-    g.add(panel);
-
-    const strut = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.06, 1.6, 6), metalMat);
-    strut.position.set(-1, 0.35, 0.6);
-    strut.rotation.set(0.2, 0, 1.1);
-    g.add(strut);
-
-    const blade = new THREE.Mesh(new THREE.BoxGeometry(2.6, 0.05, 0.28), metalMat);
-    blade.position.set(0.8, 0.12, -0.9);
-    blade.rotation.y = 0.9;
-    g.add(blade);
-
-    g.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
-    this.scene.add(g);
-    this.grid.insert(x, z, 1.6);
-
-    // The rifle and its magazines — moved here from the crash site.
-    this._addPickup(
-      this._makeRifleProp(), x + 0.6, z - 1.1,
-      'Take hunting rifle (loaded)',
-      () => {
-        this.inventory.hasRifle = true;
-        this.weapon.giveRifle();
-        this.hud.toast('Rifle equipped — LMB fire, RMB aim, R reload, 1 to holster.');
-        this._completeSurvivorsQuest();
-      },
-      { id: 'rifle' }
-    );
-
-    const magBox = new THREE.Mesh(
-      new THREE.BoxGeometry(0.28, 0.14, 0.2),
-      new THREE.MeshStandardMaterial({ color: 0x3a4030, roughness: 0.8 })
-    );
-    this._addPickup(magBox, x - 0.7, z + 0.9, 'Take rifle magazines (+10 rounds)',
-      () => this.weapon.addAmmo(10), { id: 'ammo' });
-  }
-
-  _completeSurvivorsQuest() {
-    if (this.questStage !== 1) return;
-    this.questStage = 2;
-    this.hud.setObjective('No survivors — just their gear', true);
-    this.hud.toast("Whoever carried this didn't leave willingly. You're on your own out here.", 6500);
-    setTimeout(() => {
-      this.hud.setObjective('Build a campfire');
-      this.hud.toast('You should get a fire going before the cold gets worse.', 5500);
-    }, 4000);
-    this.onQuestAdvance(this.questStage);
-  }
-
-  /** Called by Game.js right after a campfire is successfully built. */
-  notifyCampfireBuilt() {
-    if (this.questStage !== 2) return;
-    this.questStage = 3;
-    this.hud.setObjective('Camp made — settle in for the night', true);
-    setTimeout(() => {
-      this.hud.setObjective('Sleep until morning');
-      this.hud.toast('Press E at the campfire to cook or sleep until dawn.', 5500);
-    }, 3500);
-    this.onQuestAdvance(this.questStage);
-  }
-
-  /** Called by Game.js right after the player sleeps through to dawn. */
-  notifySlept() {
-    if (this.questStage !== 3) return;
-    this.questStage = 4;
-    this.hud.setObjective('Rested until dawn', true);
-    this.onQuestAdvance(this.questStage);
-  }
-
-  /** The stable resting objective text for a given quest stage — used to
-   *  restore the HUD objective when loading a save (the setTimeout-staged
-   *  transition text above only plays out once, live). */
-  static objectiveForStage(stage) {
-    switch (stage) {
-      case 1: return { text: 'Look for survivors', complete: false };
-      case 2: return { text: 'Build a campfire', complete: false };
-      case 3: return { text: 'Sleep until morning', complete: false };
-      default: return { text: 'Rested until dawn', complete: true };
+  // ------------------------------------------------------------------- wood
+  /**
+   * Fallen branches at the foot of every fifth tree (spots come from
+   * Vegetation.js, so they genuinely sit under trees rather than being
+   * scattered independently).
+   *
+   * There are a couple of hundred of these, which is far too many to build
+   * the way the handful of crash-site pickups are built: a Group per pile
+   * would mean ~3 draw calls each plus a glow sprite, i.e. close to a
+   * thousand draw calls for firewood alone. Instead every pile shares one
+   * InstancedMesh per sub-mesh of the GLB (3 draw calls total), and
+   * "removing" a collected pile means zeroing that instance's matrix. They
+   * also skip the glow sprite the loot pickups use — the [E] prompt is
+   * discovery enough for something this common, and 250 more sprites would
+   * put the draw calls straight back.
+   */
+  /**
+   * Every tree can be stripped for branches once, with E. This is the main
+   * wood supply now — fallen piles are the lucky find on top of it.
+   *
+   * One interaction per tree rather than something that searches for the
+   * nearest trunk each frame: `InteractionSystem` already picks the closest
+   * candidate in range, so trees just join that list and get the "[E]"
+   * prompt and the closest-wins behaviour for free. It scans a few hundred
+   * extra entries per frame, which is a rounding error next to the raycasts
+   * already happening, and the list shrinks as trees are used up.
+   *
+   * Deliberately *not* recorded in `takenPickups`: persisting a flag per
+   * tree would bloat the save for something the player can't really run
+   * out of, so stripped trees come back on reload.
+   */
+  _placeTreeHarvesting() {
+    for (const t of this.treeSpots) {
+      this.interactions.add({
+        position: new THREE.Vector3(t.x, t.y + 1, t.z),
+        radius: 2.0,
+        label: 'Gather wood (+1)',
+        // Ambient and everywhere — must never outrank a campfire, a pickup
+        // or the lake just by being a bit closer. See InteractionSystem.
+        priority: -1,
+        onUse: (entry) => {
+          this.inventory.wood += 1;
+          this.sfx.build(); // woody thud rather than the item-pickup blip
+          entry.disabled = true; // one armful per tree, so you keep moving
+        },
+      });
     }
-  }
-
-  /** A signal flare planted at the wreckage — unlike the crash-site flare
-   *  (light only, no prop), this one needs to actually pull the player's
-   *  eye from a distance across the dark valley, so it gets the full
-   *  treatment: a visible prop, a light that pulses deliberately (a slow
-   *  beacon pulse, not ambient flicker) rather than something the player
-   *  reads as "on fire," and smoke that visibly brightens/reddens in sync
-   *  with the pulse so the glow reads through it at range. The glow
-   *  sprite is fog-immune (`fog = false`) — that's what actually carries
-   *  visibility across the valley; the point light mostly matters once
-   *  the player is already close. */
-  _buildBeacon() {
-    const bx = WRECKAGE.x + 1.8, bz = WRECKAGE.z + 1.6; // clear of the wreckage props
-    const by = this._groundY(bx, bz);
-
-    const group = new THREE.Group();
-    group.position.set(bx, by, bz);
-    group.rotation.set(0.2, 1.4, 0.12);
-
-    const bodyMat = new THREE.MeshStandardMaterial({ color: 0x4a0d0d, roughness: 0.6 });
-    const body = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.03, 0.32, 8), bodyMat);
-    body.position.y = 0.16;
-    group.add(body);
-
-    const tipMat = new THREE.MeshStandardMaterial({
-      color: 0xff2010, emissive: 0xff2010, emissiveIntensity: 2, roughness: 0.3,
-    });
-    const tip = new THREE.Mesh(new THREE.SphereGeometry(0.035, 8, 8), tipMat);
-    tip.position.y = 0.34;
-    group.add(tip);
-    this.beaconTipMat = tipMat;
-
-    group.traverse((o) => { if (o.isMesh) o.castShadow = true; });
-    this.scene.add(group);
-
-    // The long-range visibility cue — sized generously and immune to fog
-    // so it still reads as a distant red glow through the valley haze.
-    this.beaconGlow = makeGlowSprite(0xff2010, 3.2, 0.6);
-    this.beaconGlow.position.set(bx, by + 0.4, bz);
-    this.beaconGlow.material.fog = false;
-    this.scene.add(this.beaconGlow);
-
-    this.beaconLight = new THREE.PointLight(0xff2010, 7, 55, 1.7);
-    this.beaconLight.position.set(bx, by + 1.3, bz);
-    this.scene.add(this.beaconLight);
-
-    // Smoke trail — color lerps toward a bright red-orange at the peak of
-    // each pulse (and fades back at the trough), so it reads as lit from
-    // within rather than just dark drifting haze.
-    this._beaconSmokeLow = new THREE.Color(0x4a2420);
-    this._beaconSmokeHigh = new THREE.Color(0xff6a3a);
-    this.beaconSmoke = [];
-    for (let i = 0; i < 10; i++) {
-      const s = makeSmokeSprite(0x4a2420, 1.3, 0.24);
-      s.userData.phase = i / 10;
-      s.position.set(bx, by, bz);
-      this.scene.add(s);
-      this.beaconSmoke.push(s);
-    }
-    this.beaconBaseY = by + 0.35;
-    this.beaconX = bx;
-    this.beaconZ = bz;
-
-    // Sparks spitting off the flare tip — small, fast, additive twinkles
-    // rather than the smoke's slow rising fade.
-    this.beaconSparks = [];
-    for (let i = 0; i < 5; i++) {
-      const s = makeSparkSprite(0.16, 0);
-      s.userData.seed = Math.random() * 10;
-      s.position.set(bx, by + 0.34, bz);
-      this.scene.add(s);
-      this.beaconSparks.push(s);
-    }
-  }
-
-  _updateBeacon() {
-    if (!this.beaconLight) return;
-
-    // Slow, deliberate pulse (~4s cycle) — a signal, not a flame.
-    const pulse = 0.5 + 0.5 * Math.sin(this.t * 1.6);
-    this.beaconLight.intensity = 4 + pulse * 5;
-    this.beaconTipMat.emissiveIntensity = 1.6 + pulse * 2;
-    this.beaconGlow.material.opacity = 0.4 + pulse * 0.35;
-    const gs = 1 + pulse * 0.25;
-    this.beaconGlow.scale.set(3.2 * gs, 3.2 * gs, 1);
-
-    for (const s of this.beaconSmoke) {
-      const cycle = (this.t * 0.14 + s.userData.phase) % 1;
-      s.position.set(
-        this.beaconX + Math.sin(cycle * 8 + s.userData.phase * 20) * 0.4,
-        this.beaconBaseY + cycle * 4.5,
-        this.beaconZ + Math.cos(cycle * 6) * 0.35
-      );
-      // Brightest near the source and at the peak of the pulse — the
-      // "smoke lit by the light" cue the rest of the fade doesn't give.
-      const nearSource = 1 - cycle;
-      s.material.color.copy(this._beaconSmokeLow).lerp(this._beaconSmokeHigh, pulse * nearSource);
-      s.material.opacity = (0.18 + pulse * 0.12 * nearSource) * (1 - cycle * 0.7);
-      s.scale.setScalar(0.9 + cycle * 2.2);
-    }
-
-    // Sparks: mostly dark, briefly flaring bright as they drift off the tip.
-    for (const sp of this.beaconSparks) {
-      const cycle = (this.t * 0.6 + sp.userData.seed) % 1;
-      sp.position.set(
-        this.beaconX + Math.sin(sp.userData.seed * 3) * 0.06 + cycle * Math.cos(sp.userData.seed) * 0.35,
-        this.beaconBaseY + cycle * 0.9,
-        this.beaconZ + Math.cos(sp.userData.seed * 5) * 0.06 + cycle * Math.sin(sp.userData.seed) * 0.35
-      );
-      const twinkle = Math.max(0, Math.sin(this.t * 9 + sp.userData.seed * 13));
-      sp.material.opacity = twinkle * (1 - cycle) * 0.9;
-    }
-  }
-
-  // ------------------------------------------------------------- wood/loot
-  _makeWoodPileProp() {
-    const g = new THREE.Group();
-    g.rotation.y = Math.random() * Math.PI * 2;
-    loadGLTF(woodPileUrl)
-      .then((gltf) => {
-        const model = normalizeModel(gltf.scene.clone(true), 1.2);
-        g.add(model);
-      })
-      .catch((err) => console.error('Failed to load wood pile model:', err));
-    return g;
   }
 
   _placeWood() {
-    const spots = [
-      [pathX(6) + 5, 6], [pathX(-14) - 5, -14],
-      [pathX(-42) + 4, -42], [pathX(-72) - 5, -72],
-      [pathX(-112) + 5, -112], [POND.x - 10, POND.z - 11],
-      [pathX(-192) + 4, -192], [pathX(-228) - 4, -228],
-    ];
-    spots.forEach(([x, z], i) => {
-      this._addPickup(this._makeWoodPileProp(), x, z, 'Gather firewood (+2 wood)',
-        () => { this.inventory.wood += 2; }, { yOffset: 0, glowColor: 0xd8b475, id: `wood${i}` });
-    });
-  }
+    const live = (this.firewoodSpots || [])
+      .map((s, i) => ({ ...s, id: `wood${i}` }))
+      .filter((s) => !this.takenPickups.has(s.id));
+    if (live.length === 0) return;
 
-  _buildSupplyCrate() {
-    const x = pathX(-205) + 3.5, z = -205;
-    const crate = new THREE.Mesh(
-      new THREE.BoxGeometry(0.95, 0.7, 0.7),
-      new THREE.MeshStandardMaterial({ color: 0x6b5a3a, roughness: 0.9 })
-    );
-    this._addPickup(crate, x, z, 'Search old supply crate', () => {
-      this.inventory.rations += 2;
-      this.weapon.addAmmo(5);
-      this.hud.toast('Inside: 2 rations and a box of cartridges (+5). Someone left in a hurry.');
-    }, { yOffset: 0.35, id: 'crate' });
-    this.grid.insert(x, z, 0.7);
+    this.woodParts = []; // InstancedMeshes, once the GLB resolves
+    const ZERO = new THREE.Matrix4().makeScale(0, 0, 0);
+
+    loadGLTF(woodPileUrl)
+      .then((gltf) => {
+        const proto = normalizeModel(gltf.scene.clone(true), 1.2);
+        proto.updateMatrixWorld(true);
+
+        const dummy = new THREE.Object3D();
+        proto.traverse((o) => {
+          if (!o.isMesh) return;
+          // The mesh's transform *within* the normalized wrapper has to be
+          // folded into each instance matrix, since the InstancedMesh sits
+          // at the scene root with no parent transform of its own.
+          const local = o.matrixWorld.clone();
+          const inst = new THREE.InstancedMesh(o.geometry, o.material, live.length);
+          live.forEach((s, i) => {
+            dummy.position.set(s.x, s.y, s.z);
+            dummy.rotation.set(0, s.rot, 0);
+            dummy.updateMatrix();
+            inst.setMatrixAt(i, dummy.matrix.clone().multiply(local));
+          });
+          inst.instanceMatrix.needsUpdate = true;
+          inst.castShadow = true;
+          inst.receiveShadow = true;
+          this.scene.add(inst);
+          this.woodParts.push(inst);
+        });
+      })
+      .catch((err) => console.error('Failed to load wood pile model:', err));
+
+    // Interactions register immediately — gathering never waits on the GLB.
+    live.forEach((s, i) => {
+      this.interactions.add({
+        position: new THREE.Vector3(s.x, s.y, s.z),
+        radius: 2.4,
+        label: 'Gather firewood (+2 wood)',
+        onUse: (entry) => {
+          this.takenPickups.add(s.id);
+          this.inventory.wood += 2;
+          this.sfx.pickup();
+          entry.disabled = true;
+          for (const part of this.woodParts) {
+            part.setMatrixAt(i, ZERO);
+            part.instanceMatrix.needsUpdate = true;
+          }
+        },
+      });
+    });
   }
 
   // ------------------------------------------------------------------ lake
   _buildPond() {
-    const waterMat = createWaterMaterial();
-    this.waterMaterial = waterMat;
+    // POND_RADIUS is exactly where the analytic lake bed crosses
+    // POND_WATER_Y (see heightfield.js), so the water plane's edge meets
+    // the shore precisely — no floating rim, no water spilling over dry
+    // ground, in any direction.
+    this.water = createWaterSurface({
+      x: POND.x, z: POND.z, waterY: POND_WATER_Y, flatRadius: POND_RADIUS,
+    });
+    this.scene.add(this.water);
 
-    // Placeholder disc so the basin isn't empty for the moment it takes the
-    // GLB to resolve; swapped for the real (irregular, more natural-looking)
-    // lake-shore mesh once it loads.
-    const placeholder = new THREE.Mesh(new THREE.CircleGeometry(POND_RADIUS, 28), waterMat);
-    placeholder.rotation.x = -Math.PI / 2;
-    placeholder.position.set(POND.x, POND_WATER_Y, POND.z);
-    this.scene.add(placeholder);
+    // Damp ground fading out from the waterline, so the shore reads as
+    // shore rather than as a hard edge where two meshes happen to meet.
+    this.scene.add(createShoreBlend({
+      x: POND.x, z: POND.z, innerRadius: POND_RADIUS - 0.5, outerRadius: POND_RADIUS + 9,
+    }));
+
+    // Solid — walking "into" the lake used to just walk you along the lake
+    // bed underneath the water plane. Simplest fix: you can't. Stops a
+    // little short of the waterline so the player can stand on wet sand.
+    this.grid.insert(POND.x, POND.z, POND_RADIUS - 1.2);
 
     loadTreeAssets()
-      .then((assets) => {
-        const water = new THREE.Mesh(assets.waterGeo, waterMat);
-        const scale = POND_RADIUS / assets.waterRadius;
-        water.scale.set(scale, 1, scale);
-        water.position.set(POND.x, POND_WATER_Y, POND.z);
-        this.scene.add(water);
-        this.scene.remove(placeholder);
-        this._buildLakeTrees(assets);
-      })
-      .catch((err) => console.error('Failed to load lake water mesh:', err));
+      .then((assets) => this._buildLakeTrees(assets))
+      .catch((err) => console.error('Failed to load lake treeline assets:', err));
 
-    // drink spot at the rim closest to the path
-    const dirX = pathX(POND.z) - POND.x;
-    const len = Math.abs(dirX) || 1;
-    const rimX = POND.x + (dirX / len) * (POND_RADIUS - 2);
-    const rimZ = POND.z;
+    // Drink spot on the shore facing spawn, so the player meets the lake
+    // (and the wolves) from the side they'll approach from.
+    const toSpawn = Math.atan2(-POND.z, -POND.x);
+    const rimX = POND.x + Math.cos(toSpawn) * (POND_RADIUS - 1.5);
+    const rimZ = POND.z + Math.sin(toSpawn) * (POND_RADIUS - 1.5);
     this.interactions.add({
       position: new THREE.Vector3(rimX, this._groundY(rimX, rimZ), rimZ),
-      radius: 3.2,
+      radius: 3.6,
       label: 'Drink from the lake',
       onUse: () => {
         this.stats.drink();
@@ -540,17 +419,16 @@ export class Level {
   }
 
   /** A curated treeline around the lake shore — denser and more deliberate
-   *  than the ambient procedural forest, to read as a set-piece "lake area"
-   *  rather than just more scattered woods. Reuses the same big/small/dead
-   *  species as the ambient forest (see TreeAssets.js), just placed by hand
-   *  in two staggered bands instead of scattered. The path-facing shore,
-   *  where the player walks up to drink, is left clear. */
+   *  than the ambient procedural forest, to read as a set-piece "lake area".
+   *  Reuses the same big/small/dead species as the ambient forest (see
+   *  TreeAssets.js), just placed by hand in two staggered bands. The shore
+   *  the player walks up to drink from is left clear. */
   _buildLakeTrees(assets) {
-    const approachAngle = Math.atan2(0, pathX(POND.z) - POND.x); // pond -> path
-    const approachHalfWidth = 0.8;
+    const approachAngle = Math.atan2(-POND.z, -POND.x); // lake -> spawn
+    const approachHalfWidth = 0.75;
     const bands = [
-      { radiusMul: 1.15, count: 15, heightMul: 1.0, salt: 40 },
-      { radiusMul: 1.38, count: 15, heightMul: 1.15, salt: 60 },
+      { radiusMul: 1.12, count: 16, heightMul: 1.0, salt: 40 },
+      { radiusMul: 1.34, count: 16, heightMul: 1.15, salt: 60 },
     ];
 
     for (const band of bands) {
@@ -582,76 +460,90 @@ export class Level {
         bark.castShadow = true;
         bark.receiveShadow = true;
         this.scene.add(bark);
+
         if (species.leavesGeo) {
           const leaves = new THREE.Mesh(species.leavesGeo, species.leavesMat);
-          leaves.position.set(x, y, z);
+          leaves.position.copy(bark.position);
           leaves.rotation.y = rotY;
           leaves.scale.setScalar(scale);
           leaves.castShadow = true;
           this.scene.add(leaves);
         }
-        this.grid.insert(x, z, 0.5 * scale);
+
+        this.grid.insert(x, z, 0.55);
       }
     }
   }
 
-  // ----------------------------------------------------------------- signs
-  _buildSigns() {
-    const woodMat = new THREE.MeshStandardMaterial({ color: 0x54432c, roughness: 1 });
-    const x = pathX(-28) + 2.2, z = -28;
-    const g = new THREE.Group();
-    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.08, 1.6, 6), woodMat);
-    post.position.y = 0.8;
-    const board = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.35, 0.05), woodMat);
-    board.position.set(0, 1.45, 0);
-    board.rotation.y = 0.3;
-    g.add(post, board);
-    g.position.set(x, this._groundY(x, z), z);
-    g.traverse((o) => { if (o.isMesh) o.castShadow = true; });
-    this.scene.add(g);
-
-    this.interactions.add({
-      position: g.position.clone(),
-      radius: 2.5,
-      label: 'Read weathered sign',
-      onUse: () => {
-        this.hud.toast('"RANGER STATION — ▓ km N". The distance has been scratched out.');
-      },
-    });
-  }
-
   // ------------------------------------------------------------ checkpoint
+  /** A marker on the far ridge — reaching it ends the slice. */
   _buildCheckpoint() {
-    const { x, z } = CHECKPOINT;
+    const x = CHECKPOINT.x, z = CHECKPOINT.z;
     const y = this._groundY(x, z);
     const g = new THREE.Group();
+    g.position.set(x, y, z);
+
     const post = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.08, 0.1, 3, 6),
+      new THREE.CylinderGeometry(0.08, 0.1, 3.2, 6),
       new THREE.MeshStandardMaterial({ color: 0x54432c, roughness: 1 })
     );
-    post.position.y = 1.5;
+    post.position.y = 1.6;
+    post.castShadow = true;
+
     const flag = new THREE.Mesh(
-      new THREE.PlaneGeometry(1.1, 0.6),
-      new THREE.MeshStandardMaterial({
-        color: 0xd84315, emissive: 0xd84315, emissiveIntensity: 0.4, side: THREE.DoubleSide,
-      })
+      new THREE.PlaneGeometry(1.1, 0.7),
+      new THREE.MeshStandardMaterial({ color: 0xe06a2a, roughness: 0.9, side: THREE.DoubleSide })
     );
-    flag.position.set(0.55, 2.6, 0);
+    flag.position.set(0.55, 2.7, 0);
     this.flag = flag;
+
     const beacon = makeGlowSprite(0xff6d3a, 4, 0.5);
     beacon.position.y = 2.8;
-    const light = new THREE.PointLight(0xff7744, 2, 25, 1.5);
-    light.position.y = 2.5;
+    beacon.material.fog = false; // must stay visible across the whole basin
+    const light = new THREE.PointLight(0xff6d3a, 3, 30, 2);
+    light.position.y = 2.8;
+
     g.add(post, flag, beacon, light);
-    g.position.set(x, y, z);
     this.scene.add(g);
+    this.grid.insert(x, z, 0.4);
+  }
+
+  /**
+   * The wreck burns itself out over the first `wreckBurnHours` in-game
+   * hours and is left smoking for the rest of the run.
+   *
+   * Driven off the world clock (`env.day` + `env.time`) rather than
+   * accumulated real seconds, because sleeping jumps the clock forward —
+   * measuring real time would leave the wreck merrily ablaze after a night
+   * had passed. Elapsed is measured against the fixed start of the run
+   * (day 1 at `startTimeOfDay`), so it needs no state of its own and
+   * therefore restores correctly from a save for free.
+   */
+  _updateWreckFires(dt, env) {
+    if (this.wreckFiresOut) return;
+
+    const elapsedHours = ((env.day - 1) + env.time - CONFIG.startTimeOfDay) * 24;
+    const total = CONFIG.fire.wreckBurnHours;
+    // Guttering: dies over the final hour rather than blinking out.
+    const intensity = 1 - smoothstep(total - 1, total, elapsedHours);
+
+    if (intensity <= 0) {
+      for (const f of this.wreckFires) f.extinguish();
+      this.wreckFiresOut = true;
+      return;
+    }
+    for (const f of this.wreckFires) f.update(dt, intensity);
   }
 
   // ---------------------------------------------------------------- update
-  update(dt) {
+  /** @param sun Environment's directional light (sun by day, moon by night)
+   *   — keeps the lake's specular highlight tracking wherever it actually is. */
+  update(dt, env, playerPos) {
     this.t += dt;
 
-    if (this.waterMaterial) updateWaterMaterial(this.waterMaterial, this.t);
+    if (this.water && env?.sun) updateWaterSurface(this.water, dt, env.sun);
+    if (env) this._updateWreckFires(dt, env);
+
 
     // pickup glow pulse
     const pulse = 0.24 + Math.sin(this.t * 2.5) * 0.1;
@@ -672,13 +564,5 @@ export class Level {
     // checkpoint flag wave
     if (this.flag) this.flag.rotation.y = Math.sin(this.t * 2.2) * 0.35;
 
-    // crash-site flare light: gentle, steady flicker — not the wild
-    // cone-flame look. No prop, no smoke, just the light.
-    if (this.flareLight) {
-      const flicker = Math.sin(this.t * 9) * 0.12 + Math.sin(this.t * 22 + 1.3) * 0.06;
-      this.flareLight.intensity = 6 + flicker;
-    }
-
-    this._updateBeacon();
   }
 }

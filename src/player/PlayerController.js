@@ -12,9 +12,9 @@ export class PlayerController {
     this.grid = grid;
     this.stats = stats;
 
-    this.position = new THREE.Vector3(4, 0, 14);
+    this.position = new THREE.Vector3(7, 0, 9);
     this.position.y = terrainHeight(this.position.x, this.position.z);
-    this.yaw = 0.28; // facing the wreck
+    this.yaw = 1.07; // facing the wreck across the spawn clearing
     this.pitch = 0;
     this.vel = new THREE.Vector3();
     this.bobTime = 0;
@@ -27,6 +27,20 @@ export class PlayerController {
     this.eyeHeightCur = CONFIG.player.eyeHeight;
     this.crouchToggled = false; // KeyC toggles; Ctrl still crouches only while held
     this.proneToggled = false; // KeyZ toggles
+
+    // Set by Game while the scope is up: Shift means hold-breath there, not
+    // sprint, and the two can't both own the key.
+    this.blockSprint = false;
+
+    // Where the ground is, what stops you and how far you can walk are all
+    // injectable rather than hard-wired to the wilderness heightfield, so a
+    // second level could supply flat ground, no obstacles and its own bounds
+    // without the controller knowing anything about either place.
+    this.groundAt = terrainHeight;
+    this.bounds = {
+      minX: WORLD.minX + 8, maxX: WORLD.maxX - 8,
+      minZ: WORLD.minZ + 8, maxZ: WORLD.maxZ - 8,
+    };
 
     camera.rotation.order = 'YXZ';
     input.onPress('KeyC', () => { this.crouchToggled = !this.crouchToggled; });
@@ -63,7 +77,7 @@ export class PlayerController {
     const ctrlHeld = this.input.isDown('ControlLeft') || this.input.isDown('ControlRight');
     const shiftHeld = this.input.isDown('ShiftLeft') || this.input.isDown('ShiftRight');
     const exhausted = this.stats.energy < 12;
-    const wantsSprint = moving && f > 0 && !exhausted && shiftHeld;
+    const wantsSprint = moving && f > 0 && !exhausted && shiftHeld && !this.blockSprint;
 
     this.stance = wantsSprint ? 'stand'
       : this.proneToggled ? 'prone'
@@ -100,9 +114,10 @@ export class PlayerController {
     let nx = this.position.x + this.vel.x * dt;
     let nz = this.position.z + this.vel.z * dt;
     [nx, nz] = this.grid.resolveCircle(nx, nz, P.radius);
-    nx = clamp(nx, WORLD.minX + 8, WORLD.maxX - 8);
-    nz = clamp(nz, WORLD.minZ + 8, WORLD.maxZ - 8);
-    this.position.set(nx, terrainHeight(nx, nz), nz);
+    const b = this.bounds;
+    nx = clamp(nx, b.minX, b.maxX);
+    nz = clamp(nz, b.minZ, b.maxZ);
+    this.position.set(nx, this.groundAt(nx, nz), nz);
 
     // --- camera: smoothed ground follow + head bob ---
     this.smoothY += (this.position.y - this.smoothY) * Math.min(1, dt * 12);

@@ -4,7 +4,10 @@
 // fields into a newer Game.
 
 const KEY = 'deepforest-save';
-const SAVE_VERSION = 1;
+// v5: the quest chain was removed entirely and the world grew a shooting
+// range to the north, which moved the terrain — old saved positions could
+// land inside a hillside.
+const SAVE_VERSION = 5;
 
 export function saveGame(data) {
   try {

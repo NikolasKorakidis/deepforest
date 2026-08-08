@@ -1,10 +1,12 @@
 import * as THREE from 'three';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
 import { CONFIG } from '../core/config.js';
+import { Spotter, formatCall } from './Spotter.js';
 import { makeGlowSprite } from '../core/glow.js';
-import { makeSparkSprite } from '../core/particleTextures.js';
-import { loadGLTF } from '../core/assets.js';
+import { makeSparkSprite, makeSmokeSprite } from '../core/particleTextures.js';
+import { loadGLTF, normalizeModel } from '../core/assets.js';
 import fpsHandsUrl from '../assets/models/fps_hands.glb?url';
+import binocularsUrl from '../assets/models/binoculars.glb?url';
 
 // Rifle + binoculars: the rifle viewmodel is a rigged hands+weapon GLB
 // driven by its own authored animation clips (idle/walk/shoot/reload)
@@ -46,19 +48,27 @@ const HIP_POS = new THREE.Vector3(-0.075, -0.21, -0.055);
 const AIM_POS = new THREE.Vector3(0.055, -0.26, -0.025);
 
 export class Weapon {
-  constructor({ camera, input, controller, hud, sfx, getWorld }) {
+  constructor({ camera, input, controller, hud, sfx, getWorld, getWind, getFocus, getTargets }) {
     this.camera = camera;
     this.input = input;
     this.controller = controller;
     this.hud = hud;
     this.sfx = sfx;
     this.getWorld = getWorld;
+    this.getWind = getWind; // shared Wind instance; see _updateBullets
+    this.getFocus = getFocus; // hold-breath state; steadies the sway below
+    // Grades misses against whatever the shot was aimed at (see Spotter.js).
+    this.spotter = new Spotter({ getTargets });
 
     this.equipped = null; // 'rifle' | 'binoculars' | null
     this.hasRifle = false;
     this.hasBinoculars = false;
     this.magAmmo = 0;
     this.reserveAmmo = 0;
+    // Every round that leaves the barrel, for accuracy scoring. A lifetime
+    // counter rather than a per-run one: the range snapshots it at the start
+    // of a session and diffs, so nothing here needs to know about sessions.
+    this.shotsFired = 0;
     this.cooldown = 0;
     this.reloadT = 0;
     this.shotT = 0; // keeps a fire animation from being interrupted by walk/idle
@@ -88,7 +98,7 @@ export class Weapon {
     // distance to anything in the scene (not just wolves), so it needs its
     // own far plane matching the camera's.
     this.rangeRaycaster = new THREE.Raycaster();
-    this.rangeRaycaster.far = 900;
+    this.rangeRaycaster.far = 1000; // must out-reach the furthest target (700m)
 
     this._buildViewmodels();
 
@@ -162,19 +172,35 @@ export class Weapon {
     this.flashLight.position.set(-0.03, 0.04, -0.32);
     rifle.add(this.flashLight);
 
-    // Binoculars.
+    // Binoculars viewmodel — only ever seen lowered (it's hidden while
+    // actually glassing, same as the rifle is hidden while scoped), so it's
+    // framed as something carried at the ready in the lower right.
     const binoc = new THREE.Group();
-    const tubeMat = new THREE.MeshStandardMaterial({ color: 0x1e1f22, roughness: 0.6 });
-    for (const off of [-0.035, 0.035]) {
-      const tube = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.035, 0.12, 10), tubeMat);
-      tube.rotation.x = Math.PI;
-      tube.position.set(off, 0, 0);
-      binoc.add(tube);
-    }
-    binoc.position.set(0.16, -0.18, -0.4);
+    binoc.position.set(0.15, -0.17, -0.38);
+    binoc.rotation.set(0.12, 0.3, -0.07); // canted, as if just dropped from the eyes
     binoc.visible = false;
     this.binocGroup = binoc;
     this.camera.add(binoc);
+
+    loadGLTF(binocularsUrl)
+      .then((gltf) => {
+        // The source is a porro-prism pair whose optical axis runs along
+        // local +X (objectives at +X, eyepieces at -X — established by
+        // measuring barrel radius at each end: 36mm vs 18mm). A +90° yaw
+        // maps +X onto the camera's -Z, i.e. pointing away from the player.
+        const model = normalizeModel(gltf.scene.clone(true), 0.19, {
+          ground: false, shadows: false,
+        });
+        model.rotation.y = Math.PI / 2;
+        model.traverse((o) => {
+          if (o.isMesh) {
+            o.renderOrder = 2;
+            o.frustumCulled = false; // viewmodel sits right at the near plane
+          }
+        });
+        binoc.add(model);
+      })
+      .catch((err) => console.error('Failed to load binoculars model:', err));
   }
 
   _playAnim(name, fade = 0.15) {
@@ -213,6 +239,7 @@ export class Weapon {
   }
 
   tryFire() {
+    if (this.cinematic) return; // spectating your own shot; the trigger is dead
     if (this.equipped !== 'rifle' || this.reloadT > 0 || this.cooldown > 0) return;
     if (this.magAmmo <= 0) {
       this.sfx.dry();
@@ -220,6 +247,7 @@ export class Weapon {
       return;
     }
     this.magAmmo--;
+    this.shotsFired++;
     this.cooldown = CONFIG.rifle.fireCooldown;
     this.flashT = 0.06;
     this.controller.addRecoil(0.032 + Math.random() * 0.012, (Math.random() - 0.5) * 0.012);
@@ -239,11 +267,104 @@ export class Weapon {
     this.camera.getWorldDirection(dir);
     const muzzlePos = new THREE.Vector3();
     this.camera.getWorldPosition(muzzlePos);
-    this.bullets.push({
+    // Worked out here, while `dir` is still a unit vector and before the
+    // world has had a chance to move: the spotter grades against the target
+    // as it stood at the trigger.
+    const spot = this.spotter.planFor(muzzlePos, dir, CONFIG.rifle.muzzleVelocity, this.getWind?.());
+    const bullet = {
       pos: muzzlePos,
       vel: dir.multiplyScalar(CONFIG.rifle.muzzleVelocity),
       life: CONFIG.rifle.bulletLifetime,
-    });
+      resolved: false,
+      spot,
+    };
+    this.bullets.push(bullet);
+
+    // Decide *now* whether this shot deserves the slow-motion camera. It has
+    // to be now rather than on impact, because the whole point is to watch
+    // the flight — by the time the round lands there's nothing left to show.
+    // That's what Sniper Elite does too: the shot is evaluated at the
+    // trigger, and the camera commits before anyone knows for certain.
+    if (this.onSpecialShot) {
+      const shot = this._predictShot(muzzlePos, bullet.vel);
+      // _predictShot only reports shots worth celebrating, so the roll is
+      // purely about rarity.
+      if (shot && Math.random() < CONFIG.killcam.chance) {
+        this.onSpecialShot({ ...shot, bullet });
+      }
+    }
+  }
+
+  /**
+   * Flies a throwaway copy of the shot to find what it will hit and where.
+   * Reports only the shots the kill cam cares about — a headshot or a plate
+   * struck dead centre — and null for everything else.
+   *
+   * Deliberately coarse — 1/25s steps, ~32m of travel each. That sounds
+   * reckless for deciding a bullseye, but each step is a *swept* raycast
+   * along the chord, and the only error is the arc's sag away from that
+   * chord: g·dt²/8 ≈ 2.3cm, against a bullseye radius of 15cm at 25m and
+   * 46cm at 500m. Well inside. Stepping finely instead would multiply the
+   * scene raycasts (the expensive part) by five for no decision it would
+   * change, and this runs on the firing frame where a hitch is felt.
+   */
+  _predictShot(startPos, startVel) {
+    const pos = startPos.clone();
+    const vel = startVel.clone();
+    const g = CONFIG.rifle.bulletGravity;
+    const w = this.getWind?.();
+    const ax = w ? w.x * w.speed * CONFIG.rifle.windDrift : 0;
+    const az = w ? w.z * w.speed * CONFIG.rifle.windDrift : 0;
+
+    const world = this.getWorld().children.filter((o) => o !== this.camera);
+    const step = 1 / 25;
+    const prev = new THREE.Vector3();
+    const seg = new THREE.Vector3();
+    let travelled = 0;
+    let t = 0;
+
+    // Bounded by distance rather than lifetime: a shot into empty sky would
+    // otherwise raycast the scene a hundred times for nothing. Has to
+    // out-reach the furthest plate (700m) or the kill cam could never fire
+    // on the longest shots in the game.
+    while (travelled < 900) {
+      prev.copy(pos);
+      pos.addScaledVector(vel, step);
+      pos.x += 0.5 * ax * step * step;
+      pos.y -= 0.5 * g * step * step;
+      pos.z += 0.5 * az * step * step;
+      vel.x += ax * step;
+      vel.y -= g * step;
+      vel.z += az * step;
+      t += step;
+
+      seg.subVectors(pos, prev);
+      const d = seg.length();
+      if (d < 1e-6) continue;
+      travelled += d;
+      seg.divideScalar(d);
+
+      this.bulletRaycaster.set(prev, seg);
+      this.bulletRaycaster.far = d;
+      const hit = firstSolidHit(this.bulletRaycaster.intersectObjects(world, true));
+      if (!hit) continue;
+
+      let obj = hit.object;
+      while (obj && !obj.userData.wolfRef && !obj.userData.rangeTarget) obj = obj.parent;
+      if (!obj) return null; // terrain or scenery — nothing to celebrate
+
+      const point = hit.point.clone();
+      const wolf = obj.userData.wolfRef;
+      if (wolf && !wolf.dead && wolf.isHeadshot(point)) {
+        return { kind: 'HEADSHOT', point, flightTime: t };
+      }
+      const target = obj.userData.rangeTarget;
+      if (target && target.up && !target.knocked && target.isBullseye(point)) {
+        return { kind: 'BULLSEYE', point, flightTime: t };
+      }
+      return null; // a hit, but an ordinary one
+    }
+    return null;
   }
 
   /** Advances in-flight bullets: gravity + a swept raycast per step so fast
@@ -255,8 +376,26 @@ export class Weapon {
       const b = this.bullets[i];
       b.life -= dt;
       const prevPos = b.pos.clone();
-      b.vel.y -= CONFIG.rifle.bulletGravity * dt;
+      // Closed-form constant-acceleration step: x += v·dt + ½·g·dt², then
+      // v += g·dt. Exact, so point of impact doesn't shift with framerate.
+      // (Stepping velocity first and then x += v·dt — plain Euler — biases
+      // the drop by ½·g·dt·t, which measured 0.12m low at 60fps and 0.25m
+      // low at 30fps on a 100m shot: the same hold landing differently on
+      // a slower machine.)
+      const g = CONFIG.rifle.bulletGravity;
+      // Wind is a horizontal acceleration, integrated with the same
+      // closed form as gravity so drift is framerate-independent too.
+      const w = this.getWind?.();
+      const ax = w ? w.x * w.speed * CONFIG.rifle.windDrift : 0;
+      const az = w ? w.z * w.speed * CONFIG.rifle.windDrift : 0;
+
       b.pos.addScaledVector(b.vel, dt);
+      b.pos.x += 0.5 * ax * dt * dt;
+      b.pos.y -= 0.5 * g * dt * dt;
+      b.pos.z += 0.5 * az * dt * dt;
+      b.vel.x += ax * dt;
+      b.vel.y -= g * dt;
+      b.vel.z += az * dt;
 
       const segment = new THREE.Vector3().subVectors(b.pos, prevPos);
       const dist = segment.length();
@@ -270,29 +409,114 @@ export class Weapon {
       }
 
       if (hit) {
+        // Walk up to whichever ancestor claims the hit. `wolfRef` is the
+        // wilderness's living target; `onShot` is the generic hook anything
+        // else can expose (the range's steel plates use it).
         let obj = hit.object;
-        while (obj && !obj.userData.wolfRef) obj = obj.parent;
-        if (obj && obj.userData.wolfRef) {
-          obj.userData.wolfRef.takeDamage(1);
+        while (obj && !obj.userData.wolfRef && !obj.userData.onShot) obj = obj.parent;
+        if (obj && obj.userData.onShot) {
+          obj.userData.onShot(hit.point);
+          this.hud.hitmarker();
+          b.spot = null; // it connected; there's nothing to call
+        } else if (obj && obj.userData.wolfRef) {
+          const wolf = obj.userData.wolfRef;
+          // Headshots always drop a wolf outright, regardless of remaining
+          // health — everywhere else takes CONFIG.wolf.health hits (2), the
+          // first of which leaves it wounded and slowed. `segment` is the
+          // bullet's unit direction, which the corpse is thrown along.
+          wolf.takeDamage(wolf.isHeadshot(hit.point) ? Infinity : 1, segment);
           this.hud.hitmarker();
         }
+        // Graded against where the round actually stopped, not where the
+        // step would have carried it: a shot that buried itself in the mound
+        // 40m short must read as short, not as a crossing it never made.
+        this._spotShot(b, prevPos, hit.point, true);
         this._spawnImpact(hit.point);
+        // Flagged before removal: the kill cam holds a reference to this
+        // bullet and watches it to know when the flight is over.
+        b.impact = hit.point.clone();
+        b.resolved = true;
         this.bullets.splice(i, 1);
-      } else if (b.life <= 0) {
+      } else {
+        this._spotShot(b, prevPos, b.pos, false);
+      }
+
+      if (b.life <= 0 && !b.resolved) {
+        // Expired without hitting anything — still "resolved", or a kill cam
+        // following a shot that sails into the sky would never end.
+        b.impact = b.pos.clone();
+        b.resolved = true;
         this.bullets.splice(i, 1);
       }
     }
   }
 
-  /** A brief burst of sparks where a shot lands — terrain or a wolf alike. */
+  /**
+   * Grade one step of a round's flight against the target it was aimed at.
+   *
+   * @param stopped true when `endPos` is where the round actually died, which
+   *   is what distinguishes "hasn't got there yet" from "never will".
+   */
+  _spotShot(b, prevPos, endPos, stopped) {
+    if (!b.spot) return;
+    const call = this.spotter.crossing(b.spot, prevPos, endPos);
+    if (call) {
+      this.hud.spotterCall(formatCall(call), call.dist);
+      b.spot = null;
+      return;
+    }
+    if (!stopped) return; // still in the air; it may yet get there
+    const short = this.spotter.fellShort(b.spot, endPos);
+    if (short) this.hud.spotterCall(formatCall(short), short.dist);
+    b.spot = null;
+  }
+
+  /**
+   * Where a shot lands: a dust plume plus a spray of debris.
+   *
+   * This is the single most important piece of feedback in a shooting game
+   * — a miss you can't see teaches you nothing, and at 400m the old
+   * fist-sized spark burst was a couple of pixels, so every miss looked
+   * identical to every other. The effect is therefore scaled by distance
+   * from the camera, which keeps its *angular* size roughly constant: a
+   * strike beside the 500m plate reads as clearly as one at your feet, and
+   * you can see whether you went left, right, high or low and correct.
+   */
   _spawnImpact(point) {
+    const dist = this.camera.position.distanceTo(point);
+    // Sub-linear (^0.65) rather than full angular compensation. Scaling
+    // linearly with distance holds apparent size exactly constant, but a
+    // 500m strike then throws a 6m plume — wider than the 3.5m plate beside
+    // it, which looks ridiculous and hides the very thing you're checking.
+    // This keeps a miss clearly readable at every range while staying
+    // smaller than the target it's next to.
+    const scale = Math.pow(Math.max(1, dist / 40), 0.65);
+
     const sprites = [];
-    const n = 6 + Math.floor(Math.random() * 3);
-    for (let i = 0; i < n; i++) {
-      const s = makeSparkSprite(0.09 + Math.random() * 0.06, 1);
+
+    // Dust plume — the part actually visible at range.
+    const puffs = 3;
+    for (let i = 0; i < puffs; i++) {
+      const s = makeSmokeSprite(0xb9a888, 0.5 * scale, 0.75);
       s.position.copy(point);
       const theta = Math.random() * Math.PI * 2;
-      const speed = 1 + Math.random() * 2.5;
+      s.userData.vel = new THREE.Vector3(
+        Math.cos(theta) * (0.4 + Math.random() * 0.7) * scale,
+        (1.1 + Math.random() * 0.9) * scale,
+        Math.sin(theta) * (0.4 + Math.random() * 0.7) * scale
+      );
+      s.userData.grow = (1.6 + Math.random()) * scale;
+      this.getWorld().add(s);
+      sprites.push(s);
+    }
+
+    // Debris sparks, mostly for the close-range punch.
+    const n = 6 + Math.floor(Math.random() * 3);
+    for (let i = 0; i < n; i++) {
+      const s = makeSparkSprite((0.09 + Math.random() * 0.06) * scale, 1);
+      s.position.copy(point);
+      const theta = Math.random() * Math.PI * 2;
+      const speed = (1 + Math.random() * 2.5) * scale;
       s.userData.vel = new THREE.Vector3(
         Math.cos(theta) * speed,
         (0.6 + Math.random() * 0.8) * speed,
@@ -301,7 +525,10 @@ export class Weapon {
       this.getWorld().add(s);
       sprites.push(s);
     }
-    this.impacts.push({ sprites, age: 0, life: 0.35 });
+
+    // Long enough to be spotted after the shot settles, since at distance
+    // you're often still recovering from recoil when the round lands.
+    this.impacts.push({ sprites, age: 0, life: 1.1 });
   }
 
   _updateImpacts(dt) {
@@ -310,9 +537,18 @@ export class Weapon {
       imp.age += dt;
       const fade = Math.max(0, 1 - imp.age / imp.life);
       for (const s of imp.sprites) {
-        s.userData.vel.y -= 9.8 * dt;
+        // Dust billows and hangs; debris is heavier and falls away.
+        const grow = s.userData.grow;
+        s.userData.vel.y -= (grow ? 2.4 : 11) * dt;
+        s.userData.vel.multiplyScalar(grow ? 1 - 1.7 * dt : 1);
         s.position.addScaledVector(s.userData.vel, dt);
-        s.material.opacity = fade;
+        if (grow) {
+          const sz = s.scale.x + grow * dt;
+          s.scale.set(sz, sz, 1);
+          s.material.opacity = fade * 0.6;
+        } else {
+          s.material.opacity = fade;
+        }
       }
       if (imp.age >= imp.life) {
         for (const s of imp.sprites) this.getWorld().remove(s);
@@ -364,6 +600,21 @@ export class Weapon {
       }
     }
 
+    // While the kill cam has the camera, the player's own view furniture has
+    // to go: viewmodels would hang in mid-air in third person, and the scope
+    // overlay would frame a camera that isn't looking down the scope.
+    if (this.cinematic) {
+      this.rifleGroup.visible = false;
+      this.binocGroup.visible = false;
+      this.flash.visible = false;
+      this.flashLight.intensity = 0;
+      this.hud.setScopeView(false, null);
+      this.hud.setCrosshair(false);
+      this.hud.setBinocularMask(false);
+      if (this.mixer) this.mixer.update(dt);
+      return;
+    }
+
     // FOV zoom for aiming / binoculars.
     let targetFov = 70;
     const binocAim = this.aiming && this.equipped === 'binoculars';
@@ -376,7 +627,10 @@ export class Weapon {
     }
     // The scope view only appears once the zoom-in animation has actually
     // settled on its target FOV, not the instant RMB goes down.
-    const scopeView = rifleAim && Math.abs(this.camera.fov - targetFov) < 0.5;
+    // Exposed because Focus gates the breath hold on it, and the controller
+    // suppresses sprint while it's true.
+    this.scopeView = rifleAim && Math.abs(this.camera.fov - targetFov) < 0.5;
+    const scopeView = this.scopeView;
     this.hud.setBinocularMask(binocAim);
     this.hud.setCrosshair(this.equipped === 'rifle' && !binocAim && !scopeView);
     this.hud.setScopeView(scopeView, scopeView ? this._rangefinder() : null);
@@ -400,7 +654,9 @@ export class Weapon {
       this.swayTime += dt;
       const stanceMult = A.stanceMult[this.controller.stance] ?? 1;
       const energyMult = THREE.MathUtils.lerp(A.energySwayMax, 1, this.controller.stats.energy / 100);
-      const amp = THREE.MathUtils.degToRad(A.swayMaxDeg) * stanceMult * energyMult * this.aimAmount;
+      const focusMult = this.getFocus?.().swayMult ?? 1;
+      const amp = THREE.MathUtils.degToRad(A.swayMaxDeg)
+        * stanceMult * energyMult * focusMult * this.aimAmount;
       const swayPitch = (Math.sin(this.swayTime * 0.9) * 0.6 + Math.sin(this.swayTime * 2.3 + 1.7) * 0.4) * amp;
       const swayYaw = (Math.sin(this.swayTime * 0.75 + 0.5) * 0.6 + Math.sin(this.swayTime * 1.9 + 3.1) * 0.4) * amp;
       this.camera.rotation.x += swayPitch;

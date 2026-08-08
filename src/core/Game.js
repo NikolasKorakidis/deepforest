@@ -4,7 +4,7 @@ import { Input } from './Input.js';
 import { SFX } from './sfx.js';
 import { SpatialGrid } from './SpatialGrid.js';
 import { createTerrain } from '../world/Terrain.js';
-import { scatterVegetation } from '../world/Vegetation.js';
+import { scatterVegetation, updateVegetation } from '../world/Vegetation.js';
 import { Environment } from '../world/Environment.js';
 import { Level } from '../world/Level.js';
 import { PlayerStats } from '../player/PlayerStats.js';
@@ -15,8 +15,14 @@ import { InteractionSystem } from '../systems/Interaction.js';
 import { CampfireSystem } from '../systems/Campfire.js';
 import { Inventory } from '../items/Inventory.js';
 import { HUD } from '../ui/HUD.js';
-import { clamp } from '../world/heightfield.js';
+import { clamp, terrainHeight, POND, POND_RADIUS } from '../world/heightfield.js';
 import { saveGame, loadGame, clearSave } from './save.js';
+import { PerfScaler } from './PerfScaler.js';
+import { Range } from '../world/Range.js';
+import { Wind } from '../world/Wind.js';
+import { KillCam } from './KillCam.js';
+import { Focus } from '../player/Focus.js';
+
 import { allAssetsSettled, loadProgress } from './assets.js';
 
 // Orchestrator: owns the renderer/scene/camera and every game system,
@@ -28,7 +34,11 @@ export class Game {
     // --- renderer / scene / camera ---
     this.renderer = new THREE.WebGLRenderer({ antialias: true });
     this.renderer.setSize(window.innerWidth, window.innerHeight);
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    // Pixel ratio is owned by PerfScaler from here on. It starts at 1.5
+    // rather than the device's own ratio because on a 2x display that meant
+    // rendering four times the pixels, which is by far the cheapest thing
+    // to give up and the least likely to be noticed.
+    this.perf = new PerfScaler(this.renderer, { targetFps: 60, minScale: 0.6, maxScale: 1.5 });
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -36,8 +46,10 @@ export class Game {
     container.appendChild(this.renderer.domElement);
 
     this.scene = new THREE.Scene();
+    // Far enough to see the 700m plates up on the mountain shelf, with
+    // margin for the ridge standing behind them.
     this.camera = new THREE.PerspectiveCamera(
-      70, window.innerWidth / window.innerHeight, 0.08, 900
+      70, window.innerWidth / window.innerHeight, 0.08, 1200
     );
     this.scene.add(this.camera); // required: viewmodels are camera children
 
@@ -59,7 +71,9 @@ export class Game {
     this.grid = new SpatialGrid(8);
 
     this.scene.add(createTerrain());
-    scatterVegetation(this.scene, this.grid);
+    // Firewood is placed under a fraction of the scattered trees, so Level
+    // takes its spots from the vegetation pass rather than picking its own.
+    const { firewoodSpots, treeSpots } = scatterVegetation(this.scene, this.grid);
     this.env = new Environment(this.scene);
 
     this.stats = new PlayerStats();
@@ -75,6 +89,10 @@ export class Game {
       hud: this.hud,
       sfx: this.sfx,
       getWorld: () => this.scene,
+      getWind: () => this.wind,
+      getFocus: () => this.focus,
+      // Plates and balloons both, so a missed balloon gets called too.
+      getTargets: () => (this.range ? [...this.range.targets, ...this.range.balloons] : []),
     });
     this.campfires = new CampfireSystem(
       this.scene, this.sfx, this.interactions,
@@ -85,7 +103,8 @@ export class Game {
       inventory: this.inventory, weapon: this.weapon, stats: this.stats,
       hud: this.hud, sfx: this.sfx,
       takenPickups: new Set(this.pendingSave?.takenPickups ?? []),
-      onQuestAdvance: () => this.save(),
+      firewoodSpots,
+      treeSpots,
     });
 
     this.kills = 0;
@@ -97,18 +116,39 @@ export class Game {
     this.input.onPress('KeyF', () => this.eatRation());
     this.input.onPress('KeyT', () => {
       if (this.state !== 'playing') return;
-      if (this.campfires.tryBuild(this.controller, this.inventory, this.hud)) {
-        this.level.notifyCampfireBuilt();
-      }
+      this.campfires.tryBuild(this.controller, this.inventory, this.hud);
     });
     // Sleeping (and now cooking) happens through the campfire's own E-menu
     // (see openCampfireMenu) rather than a standalone key.
 
     this.stats.onDamaged = () => this.hud.damageFlash();
 
+    // One wind, read by the bullet solver, the grass shader and the HUD
+    // gauge alike — so what the gauge shows is literally what pushes the
+    // bullet, and a player who learns to read it is actually right.
+    this.wind = new Wind();
+    this.focus = new Focus({ input: this.input });
+    this.range = new Range({
+      scene: this.scene, hud: this.hud, sfx: this.sfx,
+      interactions: this.interactions, weapon: this.weapon,
+    });
+
+    this.killcam = new KillCam({
+      camera: this.camera, scene: this.scene, hud: this.hud,
+      // Weapon hides its own viewmodels and scope overlay while the camera
+      // isn't the player's — pushed rather than polled so there's no frame
+      // where the rifle hangs in mid-air in third person.
+      onChange: (active) => { this.weapon.cinematic = active; },
+    });
+    this.weapon.onSpecialShot = (shot) => {
+      if (this.state !== 'playing') return;
+      this.killcam.start(shot, this.controller.position);
+    };
+
     // --- meta state ---
     this.state = 'loading';
     this.elapsed = 0;
+    this.saveTimer = 30;
     this.warnCooldowns = new Map();
 
     // Hold the start screen behind real asset readiness — every GLTF
@@ -138,10 +178,7 @@ export class Game {
           this.sfx.resume();
           this.input.lock();
           this.state = 'playing';
-          this.hud.setObjective('Look for survivors');
-          this.hud.toast('Your head pounds. The helicopter still burns behind you.', 5000);
-          setTimeout(() => this.hud.toast('No one answers your calls. Search the crash site.', 5000), 4000);
-          setTimeout(() => this.hud.toast('Then follow the valley north — into the dark.', 5000), 8500);
+          this.hud.toast('The range is west of the wreck. Watch the wind.', 6000);
         },
         onContinue: () => {
           this.sfx.resume();
@@ -159,12 +196,24 @@ export class Game {
 
     this.input.onLockChange((locked) => {
       if (!locked && this.state === 'playing') {
+        // Pausing cancels the cinematic. Otherwise the world stops while the
+        // kill cam waits on a bullet that can no longer move, and it hangs
+        // letterboxed forever.
+        this.killcam.stop();
         this.state = 'paused';
         this.hud.showPause(true, () => this.input.lock());
       } else if (locked && this.state === 'paused') {
         this.state = 'playing';
         this.hud.showPause(false);
       }
+    });
+
+    // Safety net for a lost pointer lock. Browsers refuse to re-lock for a
+    // moment after Escape, so a level switch made straight from the pause
+    // menu can land in 'playing' with the mouse still free and no visible
+    // way back in. A click on the canvas always re-arms it.
+    this.renderer.domElement.addEventListener('click', () => {
+      if (this.state === 'playing' && !this.input.pointerLocked) this.input.lock();
     });
 
     // Prime lighting/sky so the start-screen backdrop isn't black.
@@ -176,15 +225,57 @@ export class Game {
   }
 
   frame() {
-    const dt = Math.min(0.05, this.clock.getDelta());
+    // Real elapsed time drives the kill cam's own choreography; everything
+    // in the world runs on the scaled clock, which is what slow motion is.
+    const real = Math.min(0.05, this.clock.getDelta());
+
+    // Two systems can slow the world. The kill cam outranks focus: it has
+    // taken the camera away, and letting a held breath stretch a cinematic
+    // as well would compound two slowdowns into a crawl.
+    const scoped = this.state === 'playing' && !this.killcam.active && this.weapon.scopeView;
+    this.focus.update(real, scoped);
+    this.controller.blockSprint = this.weapon.scopeView;
+    this.hud.setFocus(this.focus);
+
+    const dt = real * (this.killcam.active ? this.killcam.timeScale : this.focus.timeScale);
     if (this.state === 'playing') this.update(dt);
     if (this.state === 'loading') this.hud.setLoadingProgress(loadProgress());
-    this.level.update(dt); // ambient animation keeps running on menus
+
+    // Ambient animation keeps running on menus, so the start screen has a
+    // living world behind it rather than a freeze-frame.
+    this.wind.update(dt);
+    this.level.update(dt, this.env, this.controller.position);
+    // The run clock is paused with the game but never scaled by focus.
+    this.range.update(dt, this.wind, this.state === 'playing' ? real : 0);
+    updateVegetation(dt, this.camera.position, this.wind);
+    // After every other camera write, so nothing fights it for control.
+    this.killcam.update(real);
+    this.perf.update(real);
     this.renderer.render(this.scene, this.camera);
   }
 
   update(dt) {
     this.elapsed += dt;
+
+    // Quest beats used to be the save trigger. With them gone, save on a
+    // timer instead — otherwise a session would never persist at all.
+    this.saveTimer -= dt;
+    if (this.saveTimer <= 0) {
+      this.saveTimer = 30;
+      this.save();
+    }
+
+    // During the kill cam the player is a spectator: the round and the world
+    // keep moving (slowly), but nothing that would let them act or come to
+    // harm while they can't see their own view.
+    if (this.killcam.active) {
+      this.input.consumeMouseDelta(); // or a scene's worth of look lands in one jolt
+      this.weapon.update(dt);
+      // Wolves keep running so the ragdoll a headshot causes actually plays
+      // out in slow motion — that hit is the whole reason for the camera.
+      for (const w of this.wolves) w.update(dt, this.wolfCtx());
+      return;
+    }
 
     this.env.update(dt, this.controller.position);
     this.controller.update(dt);
@@ -197,18 +288,8 @@ export class Game {
       altitude: this.controller.position.y,
     });
 
-    const stealthMult = this.controller.stance === 'prone' ? CONFIG.wolf.proneDetectMult
-      : this.controller.stance === 'crouch' ? CONFIG.wolf.crouchDetectMult
-      : 1;
-    const wolfCtx = {
-      playerPos: this.controller.position,
-      stats: this.stats,
-      env: this.env,
-      sfx: this.sfx,
-      hud: this.hud,
-      stealthMult,
-    };
-    for (const w of this.wolves) w.update(dt, wolfCtx);
+    const ctx = this.wolfCtx();
+    for (const w of this.wolves) w.update(dt, ctx);
 
     this.interactions.update(this.controller.position);
 
@@ -219,6 +300,7 @@ export class Game {
     this.hud.setClock(this.env.day, this.env.timeString());
     const headingDeg = ((-this.controller.yaw * 180) / Math.PI % 360 + 360) % 360;
     this.hud.setCompass(this.inventory.hasCompass ? headingDeg : null);
+    this.hud.setWind(this.wind, this.controller.yaw);
     this.hud.setColdOverlay(clamp((30 - this.stats.warmth) / 30, 0, 1));
     this.hud.setHealthPulse(this.stats.health < 25);
 
@@ -232,6 +314,23 @@ export class Game {
     // --- terminal states ---
     if (!this.stats.alive) this.gameOver();
     else if (this.controller.position.distanceTo(this.level.checkpoint) < 5) this.finish();
+  }
+
+
+
+  /** Shared context handed to every wolf each frame. */
+  wolfCtx() {
+    const stealthMult = this.controller.stance === 'prone' ? CONFIG.wolf.proneDetectMult
+      : this.controller.stance === 'crouch' ? CONFIG.wolf.crouchDetectMult
+      : 1;
+    return {
+      playerPos: this.controller.position,
+      stats: this.stats,
+      env: this.env,
+      sfx: this.sfx,
+      hud: this.hud,
+      stealthMult,
+    };
   }
 
   warn(key, condition, message, cooldownSec = 45) {
@@ -302,7 +401,6 @@ export class Game {
     await this.hud.fade(false);
     this.state = 'playing';
     this.hud.toast('You wake at first light, stiff and cold — but rested.');
-    this.level.notifySlept();
   }
 
   gameOver() {
@@ -332,12 +430,14 @@ export class Game {
    *  everything needed to resume roughly where the player left off. */
   save() {
     saveGame({
-      questStage: this.level.questStage,
       takenPickups: [...this.level.takenPickups],
       day: this.env.day,
       time: this.env.time,
       elapsed: this.elapsed,
       kills: this.kills,
+      score: this.range.score,
+      rangeKnocked: this.range.knockedDistances,
+      rangePopped: this.range.poppedBalloons,
       player: {
         x: this.controller.position.x,
         y: this.controller.position.y,
@@ -388,10 +488,10 @@ export class Game {
 
     this.elapsed = data.elapsed;
     this.kills = data.kills;
+    if (data.score) { this.range.score = data.score; this.hud.setScore(data.score, 0); }
+    this.range.restore(data.rangeKnocked ?? []);
+    this.range.restoreBalloons(data.rangePopped ?? []);
 
-    this.level.questStage = data.questStage;
-    const { text, complete } = Level.objectiveForStage(data.questStage);
-    this.hud.setObjective(text, complete);
 
     for (const f of data.campfires) this.campfires.rebuild(f.x, f.z, f.fuel, this.hud);
   }

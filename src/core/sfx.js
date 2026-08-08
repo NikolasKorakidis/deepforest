@@ -95,6 +95,9 @@ export class SFX {
     osc.stop(t + 0.2);
   }
 
+  /** Run-clock countdown. Dry enough not to be mistaken for a hit. */
+  tick() { this._blip(880, 0.05, 0.11, 'triangle'); }
+
   dry() { this._blip(1100, 0.04, 0.15, 'square'); }
   pickup() { this._blip(660, 0.09, 0.2); this._blip(880, 0.09, 0.15, 'sine', 0.08); }
   eat() { this._blip(330, 0.1, 0.2); this._blip(280, 0.1, 0.2, 'sine', 0.14); }
@@ -120,6 +123,15 @@ export class SFX {
     this._blip(500, 0.05, 0.15, 'square');
     this._blip(400, 0.05, 0.15, 'square', 0.5);
     this._blip(750, 0.05, 0.2, 'square', 1.6);
+  }
+
+  /** Steel plate ring — two close, high, fast-decaying partials, which is
+   *  what separates "metal" from the softer synth blips used elsewhere. */
+  ding() {
+    if (!this.ctx) return;
+    this._blip(1860, 0.05, 0.22, 'sine');
+    this._blip(2790, 0.04, 0.12, 'sine', 0.012);
+    this._blip(1240, 0.09, 0.1, 'triangle', 0.02);
   }
 
   drink() {

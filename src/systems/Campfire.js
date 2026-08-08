@@ -1,8 +1,8 @@
 import * as THREE from 'three';
 import { CONFIG } from '../core/config.js';
 import { terrainHeight } from '../world/heightfield.js';
-import { makeGlowSprite } from '../core/glow.js';
-import { makeFireSprite, makeSmokeSprite } from '../core/particleTextures.js';
+import { makeSmokeSprite } from '../core/particleTextures.js';
+import { FireEffect } from '../world/Fire.js';
 
 // Campfires: built anywhere on open ground for wood. A lit fire radiates
 // warmth in a radius; pressing E beside a lit one opens a menu (handled by
@@ -70,18 +70,21 @@ export class CampfireSystem {
       log.position.y = 0.15;
       group.add(log);
     }
-    // flame billboards (sprites always face the camera, so a soft outer
-    // tongue + a brighter inner core reads as real fire from any angle,
-    // unlike the flat-looking cone meshes this replaced) + glow + light
-    const flameOuter = makeFireSprite(1.05, 0.9);
-    flameOuter.position.y = 0.42;
-    const flameInner = makeFireSprite(0.6, 0.95);
-    flameInner.position.y = 0.32;
-    const glow = makeGlowSprite(0xff8833, 2.2, 0.35);
-    glow.position.y = 0.6;
-    const light = new THREE.PointLight(0xff7722, 2.4, 16, 1.6);
-    light.position.y = 0.8;
-    group.add(flameOuter, flameInner, glow, light);
+    // Flames, embers, ember bed and firelight — see world/Fire.js. Seeded
+    // from the position so a campfire restored from a save flickers the
+    // same way the original did.
+    const effect = new FireEffect({
+      radius: 0.42,
+      height: 1.15,
+      flames: 6,
+      embers: 8,
+      lightColor: 0xff7722,
+      lightIntensity: 2.6,
+      lightDistance: 17,
+      seed: x * 0.37 + z * 0.11,
+    });
+    effect.group.position.y = 0.12; // sits in the crossed logs, not under them
+    group.add(effect.group);
 
     // Rising smoke, same technique as the wreck/beacon in Level.js.
     const smoke = [];
@@ -95,7 +98,7 @@ export class CampfireSystem {
 
     this.scene.add(group);
     const fire = {
-      group, flameOuter, flameInner, glow, light, smoke,
+      group, effect, smoke,
       pos: new THREE.Vector3(x, y, z),
       baseY: y + 0.5,
       fuel,
@@ -120,26 +123,19 @@ export class CampfireSystem {
       if (f.fuel <= 0) continue;
       f.fuel -= dt;
       if (f.fuel <= 0) {
-        // extinguish
-        f.flameOuter.visible = false;
-        f.flameInner.visible = false;
-        f.glow.visible = false;
-        f.light.intensity = 0;
+        f.effect.extinguish();
         for (const s of f.smoke) s.visible = false;
         hud.toast('A campfire has burned out.');
         continue;
       }
-      // flicker
-      const flicker = Math.sin(this.t * 13 + f.pos.x) * 0.2 + Math.sin(this.t * 29) * 0.12;
-      f.light.intensity = 2.4 + flicker;
-      const s = 1 + flicker * 0.4;
-      f.flameOuter.scale.set(s, 0.9 + flicker * 0.5, s);
-      f.flameInner.scale.set(s, 1 + flicker * 0.3, s);
-      f.flameOuter.material.rotation = Math.sin(this.t * 3 + f.pos.x) * 0.15;
-      f.flameInner.material.rotation = Math.sin(this.t * 4.2 + f.pos.z) * 0.2;
-      f.glow.material.opacity = 0.3 + flicker * 0.1;
 
-      // Rising smoke, same loop-and-fade technique as the wreck/beacon.
+      // Burns down rather than snapping out: over the last stretch of fuel
+      // the flames shorten, the embers thin and the light dims, so a fire
+      // running low is something you can see coming.
+      const burn = Math.min(1, f.fuel / CONFIG.fire.dieDownSec);
+      f.effect.update(dt, burn);
+
+      // Rising smoke, same loop-and-fade technique as the wreck.
       for (const sp of f.smoke) {
         const cycle = (this.t * 0.1 + sp.userData.phase) % 1;
         sp.position.set(
@@ -147,7 +143,7 @@ export class CampfireSystem {
           f.baseY + cycle * 2.6,
           f.pos.z + Math.cos(cycle * 5) * 0.2
         );
-        sp.material.opacity = 0.22 * (1 - cycle);
+        sp.material.opacity = 0.22 * (1 - cycle) * (0.4 + burn * 0.6);
         sp.scale.setScalar(0.7 + cycle * 1.6);
       }
 

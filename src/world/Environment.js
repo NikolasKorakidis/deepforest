@@ -24,8 +24,8 @@ const NIGHT_SUN_INTENSITY_CLEAR = 0.7;
 const NIGHT_SUN_INTENSITY_OVERCAST = 0.22;
 const NIGHT_HEMI_INTENSITY_CLEAR = 0.4;
 const NIGHT_HEMI_INTENSITY_OVERCAST = 0.12;
-const NIGHT_FOG_DENSITY_CLEAR = 0.009;
-const NIGHT_FOG_DENSITY_OVERCAST = 0.016;
+const NIGHT_FOG_DENSITY_CLEAR = 0.0035;
+const NIGHT_FOG_DENSITY_OVERCAST = 0.011;
 const NIGHT_SKY_CLEAR = new THREE.Color(0x1c2740);
 const NIGHT_SKY_OVERCAST = new THREE.Color(0x05070f);
 const HEMI_NIGHT_CLEAR = new THREE.Color(0x4a5c82);
@@ -53,8 +53,13 @@ export class Environment {
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(2048, 2048);
     const cam = this.sun.shadow.camera;
-    cam.left = -60; cam.right = 60; cam.top = 60; cam.bottom = -60;
-    cam.near = 1; cam.far = 400;
+    // Tightened from ±60 to ±42. The shadow camera's extent decides both
+    // how many objects get re-rendered into the shadow map each frame and
+    // how much texel resolution each one gets, so shrinking it is a rare
+    // change that makes shadows both cheaper *and* sharper. 42 units still
+    // covers well beyond the distance shadow detail is readable at.
+    cam.left = -42; cam.right = 42; cam.top = 42; cam.bottom = -42;
+    cam.near = 1; cam.far = 260;
     this.sun.shadow.bias = -0.0004;
     this.sun.shadow.normalBias = 0.5;
     scene.add(this.sun);
@@ -139,14 +144,14 @@ export class Environment {
     return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
   }
 
-  /** Jump to the next morning (used by sleeping at a campfire). Lands just
-   *  past the sunrise threshold (time=0.25 is exactly horizon) — early
-   *  enough that the sun is barely up and the sky still carries a warm
-   *  dawn tint, rather than mid-morning full daylight. */
+  /** Jump forward to waking time (used by sleeping at a campfire). */
   skipToMorning() {
-    const DAWN = 0.26;
-    if (this.time > DAWN) this.day++;
-    this.time = DAWN;
+    // Wakes at midday rather than first light: you sleep off the night the
+    // fire was built for, and come to with the sun high and a full day to
+    // work with. (time is a fraction of a day, so 0.5 == 12:00.)
+    const WAKE = 0.5;
+    if (this.time > WAKE) this.day++;
+    this.time = WAKE;
   }
 
   update(dt, playerPos) {
@@ -190,7 +195,11 @@ export class Environment {
 
     this.scene.fog.color.copy(this.skyColor);
     const nightFogDensity = lerp(NIGHT_FOG_DENSITY_CLEAR, NIGHT_FOG_DENSITY_OVERCAST, this.cloudCover);
-    this.scene.fog.density = lerp(nightFogDensity, 0.0065, this.daylight);
+    // Thinned right down from 0.0065: FogExp2 falls off with the square of
+    // distance, so the old value left a 500m plate at ~3% visibility — the
+    // far end of the range was literally not there. At 0.0014 it's hazy but
+    // legible, which is also the more honest look for long-range shooting.
+    this.scene.fog.density = lerp(nightFogDensity, 0.0011, this.daylight);
 
     // Clouds (once they exist) hide stars and the moon, not just dim them.
     const nightVisibility = (1 - this.daylight) * (1 - this.cloudCover);

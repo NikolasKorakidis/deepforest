@@ -1,13 +1,23 @@
 import * as THREE from 'three';
-import { terrainHeight, pathX, fbm, smoothstep, WORLD } from './heightfield.js';
+import {
+  terrainHeight, fbm, smoothstep, forestDensity, WORLD, POND, POND_RADIUS,
+} from './heightfield.js';
 
 /**
  * Builds the terrain mesh from the shared heightfield, with vertex colors:
- * grass in the valley, dirt on the path, rock on slopes, snow up high.
+ * open meadow grass in the clearings, darker leaf-litter under the dense
+ * forest (driven by the same `forestDensity` that decides where trees
+ * actually go, so ground tint and canopy always agree), wet sand around the
+ * lake, rock on steep slopes and snow on the high ridge.
  */
 export function createTerrain() {
-  const segs = 220;
-  const geo = new THREE.PlaneGeometry(WORLD.sizeX, WORLD.sizeZ, segs, segs);
+  // Segments follow the world's aspect rather than being square, so the
+  // long northern arm holding the range lane keeps the same ~1.5m vertex
+  // spacing as the basin instead of being stretched coarse.
+  const spacing = 1.55;
+  const segX = Math.round(WORLD.sizeX / spacing);
+  const segZ = Math.round(WORLD.sizeZ / spacing);
+  const geo = new THREE.PlaneGeometry(WORLD.sizeX, WORLD.sizeZ, segX, segZ);
   geo.rotateX(-Math.PI / 2);
   geo.translate(WORLD.centerX, 0, WORLD.centerZ);
 
@@ -19,21 +29,28 @@ export function createTerrain() {
 
   const nrm = geo.attributes.normal;
   const colors = new Float32Array(pos.count * 3);
-  const grassA = new THREE.Color(0x2d4020);
-  const grassB = new THREE.Color(0x3a4d24);
-  const dirt = new THREE.Color(0x5a4a33);
+  const meadowA = new THREE.Color(0x4a5f2a);   // sunlit open grass
+  const meadowB = new THREE.Color(0x5b6d33);
+  const forestFloor = new THREE.Color(0x2a3419); // shaded leaf litter
+  const sand = new THREE.Color(0x6b5c40);
   const rock = new THREE.Color(0x63656a);
   const snow = new THREE.Color(0xdfe6ec);
   const c = new THREE.Color();
 
   for (let i = 0; i < pos.count; i++) {
     const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
-    c.copy(grassA).lerp(grassB, fbm(x * 0.05, z * 0.05, 2, 7));
+
+    c.copy(meadowA).lerp(meadowB, fbm(x * 0.05, z * 0.05, 2, 7));
+    c.lerp(forestFloor, forestDensity(x, z) * 0.85);
+
+    // Damp sand ring at the waterline.
+    const dpond = Math.hypot(x - POND.x, z - POND.z);
+    c.lerp(sand, (1 - smoothstep(POND_RADIUS - 2, POND_RADIUS + 7, dpond)) * 0.75);
+
     const slope = 1 - nrm.getY(i);
-    c.lerp(rock, smoothstep(0.12, 0.3, slope));
-    c.lerp(snow, smoothstep(17, 24, y) * (1 - smoothstep(0.2, 0.4, slope)));
-    const dp = Math.abs(x - pathX(z));
-    c.lerp(dirt, (1 - smoothstep(1.6, 4.5, dp)) * 0.8);
+    c.lerp(rock, smoothstep(0.14, 0.34, slope));
+    c.lerp(snow, smoothstep(34, 48, y) * (1 - smoothstep(0.22, 0.42, slope)));
+
     colors[i * 3] = c.r;
     colors[i * 3 + 1] = c.g;
     colors[i * 3 + 2] = c.b;

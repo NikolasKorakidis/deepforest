@@ -39,67 +39,198 @@ export function fbm(x, z, octaves = 4, seed = 0) {
 }
 
 // ---------------------------------------------------------------------------
-// World layout. The playable route runs from the crash clearing at the origin
-// north (-Z) along a winding valley path to the checkpoint at END_Z.
+// World layout: an open wilderness basin rather than the old scripted valley
+// corridor. Rolling forested hills in every direction, a lake off to the
+// north-east, and a ring of steep ridges at the edge that fences the play
+// area in naturally (no invisible walls — the slope itself reads as "not
+// that way"). Everything is a pure function of (x, z), so the same layout
+// is regenerated identically on every load with nothing to store.
 // ---------------------------------------------------------------------------
 
+// The basin is 400 wide but runs long to the north, because the shooting
+// range shares this map and a 500m lane simply does not fit in a 400m box —
+// the diagonal would have to run through the crash site to be long enough.
 export const WORLD = {
-  minX: -210, maxX: 210,
-  minZ: -345, maxZ: 75,
-  sizeX: 420, sizeZ: 420,
-  centerX: 0, centerZ: -135,
+  minX: -200, maxX: 200,
+  minZ: -760, maxZ: 200,
+  sizeX: 400, sizeZ: 960,
+  centerX: 0, centerZ: -280,
 };
 
-export const END_Z = -290;
+/**
+ * The shooting range: a cleared lane running north from a firing line near
+ * the crash site. Placed off to the west of the spawn clearing and well
+ * clear of the lake, so it's a short walk from where you wake up rather
+ * than a separate place you teleport to.
+ */
+export const RANGE = {
+  laneX: -40,
+  firingZ: 30,
+  maxDist: 700,
+  halfWidth: 32,   // cleared ground either side of the centre line
+  shoulder: 26,    // blend distance back out to natural terrain
+  laneY: 1.4,
+};
 
-/** Centerline of the valley path as a function of z. */
-export function pathX(z) {
-  return 10 * Math.sin(z * 0.023) + 7 * Math.sin(z * 0.0095 + 1.7);
+/**
+ * Target layout, shared so terrain, vegetation and Range.js can't disagree
+ * about where the plates are.
+ *
+ * Each target gets its own *angular* lane rather than sharing a centreline:
+ * a plate at 150m would otherwise sit exactly on the line of sight to the
+ * plate at 500m. The farthest takes the centre lane and the nearest the
+ * outermost, because a 25m plate subtends the most angle but converting
+ * that to metres at 25m costs almost nothing.
+ */
+export const RANGE_DISTANCES = [25, 50, 75, 100, 150, 200, 250, 300, 400, 500, 600, 700];
+// 2.2° rather than 3°: with twelve targets the outermost lane is now six
+// steps out, and a wider step would fling the 400m plate past the cleared
+// ground. Still far more than the ~0.2° a distant plate subtends, so
+// nothing occludes anything.
+const LANE_STEP_DEG = 2.2;
+
+/** Distances whose plate stands on a rise rather than the lane floor. */
+const HILL_TARGETS = new Set([150, 300, 500]);
+
+// Past this the lane stops being a valley floor and climbs the mountain, so
+// the longest shots are also uphill shots onto a shelf high above the firing
+// line. Ramped with a smoothstep so the ground never rises faster than the
+// sightline to whatever stands on it — see the range verification.
+const CLIMB_START = 520;
+const CLIMB_END = 700;
+const CLIMB_HEIGHT = 42;
+
+export function rangeTargetSpots() {
+  const byDistance = [...RANGE_DISTANCES].sort((a, b) => b - a);
+  return byDistance.map((dist, j) => {
+    const lane = Math.ceil(j / 2) * (j % 2 === 1 ? -1 : 1);
+    const x = RANGE.laneX + dist * Math.tan((lane * LANE_STEP_DEG * Math.PI) / 180);
+    return { dist, x, z: RANGE.firingZ - dist, onHill: HILL_TARGETS.has(dist) };
+  });
 }
 
-// Pushed well off the path so a proper lake-sized basin doesn't flood the
-// walkable corridor (valley walls start rising at dp > 22).
-export const POND = { x: pathX(-150) + 27, z: -150 };
-export const POND_RADIUS = 13;
+// Mounds under the hill targets, as pure geometry so terrainHeight stays a
+// function of position alone. Raising a far plate onto a rise also makes it
+// *easier* to see — it breaks the silhouette off the ground behind it.
+const MOUNDS = rangeTargetSpots()
+  .filter((t) => t.onHill)
+  // 14m rather than 26m. A wide mound spills sideways into the *next*
+  // lane's sightline — the 150m rise was standing 0.5m proud of the line to
+  // the 250m plate, hiding it completely. Lane separation is only ~6m at
+  // 150m, so a mound has to stay tight to be a hill rather than a wall.
+  .map((t) => ({ x: t.x, z: t.z, radius: 14, height: 5.5 }));
 
-/** Smooth elevation gain heading north toward the mountain pass. */
-function climb(z) {
-  return 16 * smoothstep(0, 280, -z) + 30 * smoothstep(280, 340, -z);
+const RANGE_END_Z = RANGE.firingZ - RANGE.maxDist - 45;
+
+/** 0..1 — how much (x, z) is inside the cleared lane. Vegetation uses this
+ *  to keep the lane open, and terrainHeight to flatten it. */
+export function rangeCorridor(x, z) {
+  if (z > RANGE.firingZ + 25 || z < RANGE_END_Z) return 0;
+  const across = 1 - smoothstep(RANGE.halfWidth, RANGE.halfWidth + RANGE.shoulder, Math.abs(x - RANGE.laneX));
+  if (across <= 0) return 0;
+  const ends = smoothstep(RANGE_END_Z, RANGE_END_Z + 35, z)
+    * (1 - smoothstep(RANGE.firingZ + 6, RANGE.firingZ + 25, z));
+  return across * ends;
 }
 
-/** Height along the path centerline (gentle, always walkable). */
-function pathHeight(z) {
-  return climb(z) + 1.6 * Math.sin(z * 0.05) + 0.8 * Math.sin(z * 0.021 + 3);
-}
+/** Where the player starts — a small natural clearing at the origin. */
+export const SPAWN_CLEARING_RADIUS = 16;
+
+export const POND = { x: 52, z: -64 };
+/** Radius of the visible water surface — and, by construction below, exactly
+ *  where the lake bed crosses the waterline. */
+export const POND_RADIUS = 17;
+
+// The lake bed is an analytic bowl that *overrides* the terrain noise near
+// the lake rather than being subtracted from it. That's what guarantees a
+// clean shoreline: with a noisy bed, the ground wanders above and below the
+// water level at the rim, so the water plane's edge ends up hanging over
+// ground that is still below it (a visible floating-disc seam) in some
+// directions and buried in others. Here the bed is a pure function of
+// distance from the lake center, so `terrainHeight == POND_WATER_Y` holds
+// *exactly* at POND_RADIUS in every direction.
+const LAKE_FLOOR = -3.6;
+const LAKE_RISE = 7.5;
+const lakeBed = (d) => LAKE_FLOOR + LAKE_RISE * smoothstep(POND_RADIUS - 8, POND_RADIUS + 10, d);
+
+// The encircling ridge: ground climbs hard between these radii.
+const RIM_INNER = 145;
+const RIM_OUTER = 205;
 
 export function terrainHeight(x, z) {
-  const n1 = fbm(x * 0.016, z * 0.016, 4) * 2 - 1;       // rolling hills
-  const n2 = fbm(x * 0.06 + 100, z * 0.06, 3) * 2 - 1;   // small detail
-  let h = n1 * 8 + n2 * 1.2 + climb(z);
+  const broad = fbm(x * 0.0072, z * 0.0072, 4, 11) * 2 - 1;  // big rolling hills
+  const mid = fbm(x * 0.029 + 100, z * 0.029, 3, 5) * 2 - 1; // hummocks
+  const fine = fbm(x * 0.105 + 50, z * 0.105, 2, 3) * 2 - 1; // surface roughness
+  let h = broad * 11 + mid * 2.4 + fine * 0.5;
 
-  // Valley walls rise away from the path so the route reads as a corridor.
-  const dp = Math.abs(x - pathX(z));
-  h += smoothstep(22, 85, dp) * (14 + 10 * fbm(x * 0.01 + 50, z * 0.01, 3));
+  // Ridge ring — rises steeply toward the world edge, with noise so it
+  // reads as ragged hills rather than a bowl.
+  const d = Math.hypot(x, z);
+  h += smoothstep(RIM_INNER, RIM_OUTER, d) * (48 + 22 * fbm(x * 0.01, z * 0.01, 3, 21));
 
-  // A wall behind the start so the player heads north.
-  h += 20 * smoothstep(30, 80, z);
+  // Spawn clearing: flatten a gentle, obviously-walkable patch at the origin.
+  h = lerp(h, 1.1 + fine * 0.35, 1 - smoothstep(SPAWN_CLEARING_RADIUS * 0.65, SPAWN_CLEARING_RADIUS, d));
 
-  // Flatten a walkable corridor along the path.
-  const f = 1 - smoothstep(2.8, 11, dp);
-  h = lerp(h, pathHeight(z), f * 0.92);
-
-  // Crash-site clearing around the origin.
-  const dc = Math.hypot(x, z);
-  h = lerp(h, 0.4 + n2 * 0.3, 1 - smoothstep(9, 22, dc));
-
-  // Lake basin — wide and flat-bottomed, with a gentle shore slope.
+  // Lake basin: blend fully over to the analytic bed near the water, then
+  // back out to natural terrain well beyond the shore. The inner blend
+  // reaching 1 before POND_RADIUS is what makes the exact-waterline
+  // guarantee hold.
   const dpond = Math.hypot(x - POND.x, z - POND.z);
-  h -= 4.5 * (1 - smoothstep(POND_RADIUS - 3, POND_RADIUS + 4, dpond));
+  if (dpond < POND_RADIUS + 20) {
+    const toBed = 1 - smoothstep(POND_RADIUS + 6, POND_RADIUS + 20, dpond);
+    h = lerp(h, lakeBed(dpond), toBed);
+  }
+
+  // Range lane, applied last so it wins: a dead-flat firing lane is the
+  // whole point, and it has to cut straight through the ridge ring that
+  // would otherwise rear up 60m across the far half of it. The ridge is
+  // left standing either side, which frames the lane like a cutting and
+  // gives long shots a backstop.
+  const lane = rangeCorridor(x, z);
+  if (lane > 0) h = lerp(h, rangeFloor(x, z), lane);
 
   return h;
 }
 
-/** Water surface height for the lake (sits below the basin rim, above the floor). */
-export const POND_WATER_Y = terrainHeight(POND.x, POND.z) + 2.3;
+/**
+ * The lane's own ground: a gently rolling floor rather than a runway, plus
+ * the mounds the hill targets stand on. Kept low-frequency and shallow so
+ * it reads as ground without ever rising into a sightline — see the LOS
+ * check in the range verification.
+ */
+function rangeFloor(x, z) {
+  const along = RANGE.firingZ - z;
+  let y = RANGE.laneY
+    + 1.15 * Math.sin(z * 0.017 + 0.6)
+    + 0.7 * Math.sin(x * 0.035 + z * 0.008)
+    + CLIMB_HEIGHT * smoothstep(CLIMB_START, CLIMB_END, along);
 
-export const CHECKPOINT = { x: pathX(END_Z), z: END_Z };
+  for (const m of MOUNDS) {
+    const d = Math.hypot(x - m.x, z - m.z);
+    // cos falloff: flat-topped enough to stand a target on, and it meets
+    // the surrounding floor with zero gradient rather than a crease.
+    if (d < m.radius) y += m.height * 0.5 * (1 + Math.cos((d / m.radius) * Math.PI));
+  }
+  return y;
+}
+
+/** Water surface height. Defined as the bed height exactly at POND_RADIUS,
+ *  so the waterline lands precisely on the shore in every direction. */
+export const POND_WATER_Y = lakeBed(POND_RADIUS);
+
+/**
+ * How thick the forest is at (x, z), 0..1. Drives both where trees are
+ * scattered and how the ground is tinted, so the two always agree: 1 is
+ * deep dense woodland, 0 is open meadow/clearing. Deliberately a different
+ * noise seed/frequency from the height field so groves don't just mirror
+ * the hills.
+ */
+export function forestDensity(x, z) {
+  const n = fbm(x * 0.0105 + 300, z * 0.0105, 3, 77);
+  return clamp(n * 2.35 - 0.52, 0, 1);
+}
+
+/** A rise on the far side of the forest that ends the slice. Kept inside
+ *  the vegetated play area (well within the ridge ring) so the walk there
+ *  is through forest rather than up bare rock. */
+export const CHECKPOINT = { x: -78, z: -90 };

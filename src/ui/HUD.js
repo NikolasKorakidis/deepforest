@@ -4,6 +4,8 @@
 
 import scopeReticleUrl from '../assets/textures/scope-reticle.svg?url';
 import binocMaskUrl from '../assets/textures/binoculars-mask.png?url';
+import { CONFIG } from '../core/config.js';
+import { MEDALS } from '../core/medals.js';
 
 const STAT_DEFS = [
   ['health', 'Health', '#c94f42'],
@@ -42,6 +44,8 @@ export class HUD {
         <div id="scope-range"></div>
       </div>
       <div id="fade"></div>
+      <div id="focus"><div id="focus-bar"><i></i></div><div id="focus-label"></div></div>
+      <div id="killcam"><div class="bar top"></div><div class="bar bottom"></div><div id="killcam-label"></div></div>
 
       <div id="stats">
         ${STAT_DEFS.map(([key, label, color]) => `
@@ -57,6 +61,20 @@ export class HUD {
       </div>
 
       <canvas id="compass" width="300" height="34" class="hidden"></canvas>
+      <div id="wind"><canvas id="wind-dial" width="96" height="96"></canvas><div id="wind-speed"></div></div>
+      <div id="spotter"><span id="spotter-range"></span><span id="spotter-call"></span></div>
+      <div id="session" class="hidden">
+        <div id="session-clock">2:00</div>
+        <div id="session-stats"></div>
+      </div>
+      <div id="scorecard" class="hidden"><div class="card">
+        <h3 id="sc-title">RUN COMPLETE</h3>
+        <div id="sc-score"></div>
+        <table id="sc-rows"></table>
+        <div id="sc-medals"></div>
+        <div id="sc-best"></div>
+      </div></div>
+      <div id="score"><span id="score-value">0</span><span id="score-streak"></span></div>
       <div id="clock"></div>
       <div id="objective" class="hidden"></div>
       <div id="crosshair" class="hidden"></div>
@@ -78,17 +96,22 @@ export class HUD {
       <div id="start-screen" class="screen hidden">
         <div class="panel">
           <h1>DEEP FOREST</h1>
-          <p class="story">The helicopter went down in the dark. It's still burning.<br>
-          You are hurt, cold, and alone — and the valley ahead is the only way out.<br>
-          Look for survivors. Scavenge what you can. Follow the path north.</p>
+          <p class="story">The helicopter went down at first light. It's still burning.<br>
+          West of the wreck someone cut a firing lane into the hillside —
+          steel plates from 25 to 500 metres.<br>
+          Range them, read the wind, and see what you can hit.<br>
+          The post at the firing line starts a timed run — everything resets,
+          two minutes on the clock, and your best is kept. Miss, and the
+          spotter calls the correction.</p>
           <div class="controls">
-            <span><b>WASD</b> move</span><span><b>Shift</b> sprint</span>
+            <span><b>WASD</b> move</span><span><b>Shift</b> sprint / hold breath</span>
             <span><b>C / Ctrl</b> crouch</span><span><b>Z</b> prone</span>
             <span><b>Mouse</b> look</span><span><b>E</b> interact</span>
             <span><b>LMB</b> fire</span><span><b>RMB</b> toggle aim / zoom</span>
             <span><b>R</b> reload</span><span><b>1 / 2</b> rifle / binoculars</span>
             <span><b>F</b> eat ration</span><span><b>T</b> build campfire</span>
-            <span><b>E</b> at fire: cook / sleep</span><span><b>Esc</b> pause</span>
+            <span><b>Wind</b> dial, top right</span><span><b>Scope</b> marks = 100m each</span>
+            <span><b>E</b> at the post: timed run</span><span><b>Esc</b> pause</span>
           </div>
           <p class="begin" id="begin-fresh">CLICK TO BEGIN</p>
           <div id="save-choice" class="hidden">
@@ -99,7 +122,10 @@ export class HUD {
       </div>
 
       <div id="pause-screen" class="screen hidden">
-        <div class="panel"><h2>PAUSED</h2><p class="begin">CLICK TO RESUME</p></div>
+        <div class="panel">
+          <h2>PAUSED</h2>
+          <p class="begin">CLICK TO RESUME</p>
+        </div>
       </div>
 
       <div id="death-screen" class="screen hidden">
@@ -129,6 +155,8 @@ export class HUD {
     }
     this.compassCtx = this.el('compass').getContext('2d');
     this._toastCount = 0;
+    this._scorecardT = null;
+    this._spotterT = null;
     this._pauseResumeHandler = null;
 
     this.el('retry-btn').addEventListener('click', () => location.reload());
@@ -159,11 +187,213 @@ export class HUD {
   }
 
   // -------------------------------------------------------------- objective
-  setObjective(text, complete = false) {
+  /**
+   * @param text     the objective line itself, counter included
+   *   ("Investigate the crash  2/4").
+   * @param complete ticks and greens it out.
+   * @param note     optional smaller hint line underneath ("Look in the
+   *   forest for wood") — where to go / what to do, as opposed to what.
+   */
+  setObjective(text, complete = false, note = null) {
     const el = this.el('objective');
     el.classList.toggle('hidden', !text);
     el.classList.toggle('complete', complete);
-    if (text) el.textContent = (complete ? '✓ ' : '▸ ') + text;
+    if (!text) return;
+
+    el.textContent = '';
+    const main = document.createElement('div');
+    main.className = 'objective-main';
+    main.textContent = (complete ? '✓ ' : '▸ ') + text;
+    el.appendChild(main);
+    if (note) {
+      const hint = document.createElement('div');
+      hint.className = 'objective-note';
+      hint.textContent = note;
+      el.appendChild(hint);
+    }
+  }
+
+  // ------------------------------------------------------------ wind gauge
+  /**
+   * Sniper-Elite-style wind dial. The needle shows wind direction *relative
+   * to where the player is looking*, which is the only frame that helps:
+   * what a shooter needs to know is whether it pushes left or right across
+   * their own sightline, not its compass bearing. Straight up means the
+   * wind is blowing away from you (no drift); pointing right means it will
+   * carry the bullet right.
+   *
+   * @param wind        the shared Wind instance
+   * @param headingRad  the player's yaw
+   */
+  setWind(wind, headingRad) {
+    const ctx = this.el('wind-dial').getContext('2d');
+    const cx = 48, cy = 48, R = 34;
+    ctx.clearRect(0, 0, 96, 96);
+
+    ctx.strokeStyle = 'rgba(216,212,200,0.35)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(cx, cy, R, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // Cross ticks, so "sideways" is readable at a glance.
+    ctx.strokeStyle = 'rgba(216,212,200,0.22)';
+    ctx.lineWidth = 1;
+    for (let i = 0; i < 4; i++) {
+      const a = (i / 4) * Math.PI * 2;
+      ctx.beginPath();
+      ctx.moveTo(cx + Math.cos(a) * (R - 6), cy + Math.sin(a) * (R - 6));
+      ctx.lineTo(cx + Math.cos(a) * R, cy + Math.sin(a) * R);
+      ctx.stroke();
+    }
+
+    // World bearing of the wind, minus where the player faces.
+    const rel = Math.atan2(wind.x, -wind.z) - headingRad;
+    const strength = Math.min(1, wind.speed / 12);
+    const len = 8 + strength * (R - 12);
+
+    // Canvas y grows downward, hence the negated sine: screen-up is "away".
+    const tipX = cx + Math.sin(rel) * len;
+    const tipY = cy - Math.cos(rel) * len;
+
+    ctx.strokeStyle = strength > 0.62 ? '#e0733c' : '#e8e4d8';
+    ctx.fillStyle = ctx.strokeStyle;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(tipX, tipY);
+    ctx.stroke();
+
+    // Arrowhead
+    const ah = 7;
+    ctx.beginPath();
+    ctx.moveTo(tipX, tipY);
+    ctx.lineTo(tipX - Math.sin(rel - 0.42) * ah, tipY + Math.cos(rel - 0.42) * ah);
+    ctx.lineTo(tipX - Math.sin(rel + 0.42) * ah, tipY + Math.cos(rel + 0.42) * ah);
+    ctx.closePath();
+    ctx.fill();
+
+    this.el('wind-speed').textContent = `${wind.speed.toFixed(1)} m/s`;
+  }
+
+  /** Letterboxes the view and names the shot. null ends it. The rest of the
+   *  HUD is hidden meanwhile — stat bars over a cinematic look wrong, and
+   *  the crosshair is meaningless when the camera isn't yours. */
+  setKillcam(kind) {
+    const el = this.el('killcam');
+    el.classList.toggle('active', !!kind);
+    document.getElementById('hud').classList.toggle('cinematic', !!kind);
+    if (kind) this.el('killcam-label').textContent = kind;
+  }
+
+  /**
+   * Breath meter under the reticle. Only shown when it's actionable —
+   * while holding, and while recovering — so it isn't a permanent fixture
+   * of a view whose whole job is to be uncluttered.
+   */
+  setFocus(focus) {
+    const el = this.el('focus');
+    const show = focus.state !== 'ready';
+    el.classList.toggle('active', show);
+    if (!show) return;
+    const holding = focus.state === 'holding';
+    el.classList.toggle('recovering', !holding);
+    this.el('focus-bar').firstElementChild.style.width = `${Math.max(0, focus.fraction) * 100}%`;
+    this.el('focus-label').textContent = holding
+      ? 'HOLDING BREATH'
+      : `RECOVERING  ${Math.ceil(focus.recovery)}s`;
+  }
+
+  // --------------------------------------------------------------- spotter
+  /** A called miss, e.g. ("1.2m LOW   0.8m RIGHT", 400). Stays up long enough
+   *  to act on and no longer — the correction is for the *next* shot. */
+  spotterCall(text, dist) {
+    const el = this.el('spotter');
+    this.el('spotter-range').textContent = `${dist}m`;
+    this.el('spotter-call').textContent = text;
+    // Restart the animation even if a call is already showing: rapid fire
+    // would otherwise leave the first call's timer governing the last one.
+    el.classList.remove('active');
+    void el.offsetWidth;
+    el.classList.add('active');
+    clearTimeout(this._spotterT);
+    this._spotterT = setTimeout(() => el.classList.remove('active'), 3600);
+  }
+
+  // ------------------------------------------------------------- run clock
+  /** @param s null to hide, else { left, score, hits, shots }. */
+  setSession(s) {
+    const el = this.el('session');
+    el.classList.toggle('hidden', !s);
+    if (!s) return;
+    const secs = Math.max(0, s.left);
+    const mm = Math.floor(secs / 60);
+    const ss = Math.floor(secs % 60);
+    this.el('session-clock').textContent = `${mm}:${String(ss).padStart(2, '0')}`;
+    el.classList.toggle('urgent', secs <= 10);
+    const acc = s.shots > 0 ? Math.round((s.hits / s.shots) * 100) : 0;
+    this.el('session-stats').textContent =
+      `${s.score} pts   ·   ${s.hits}/${s.shots}   ·   ${acc}%`;
+  }
+
+  hideScorecard() {
+    clearTimeout(this._scorecardT);
+    this.el('scorecard').classList.add('hidden');
+  }
+
+  /**
+   * End-of-run summary. Auto-dismisses rather than waiting for a click:
+   * dismissing it would mean releasing the pointer lock, and dropping the
+   * player out of mouse-look to read their own score is a worse trade than
+   * simply letting it fade.
+   */
+  showScorecard(run, best, beaten, newMedals = [], medalCount = 0) {
+    const el = this.el('scorecard');
+    this.el('sc-title').textContent = run.cleared ? 'RANGE CLEARED' : 'TIME';
+    this.el('sc-score').textContent = `${run.score}`;
+
+    const rows = [
+      ['Hits', `${run.hits} / ${run.shots}`],
+      ['Accuracy', `${Math.round(run.accuracy * 100)}%`, beaten.accuracy && run.shots > 0],
+      ['Best shot', run.bestShot ? `${run.bestShot} m` : '—', beaten.bestShot && run.bestShot > 0],
+      ['Longest streak', run.longestStreak > 1 ? `x${run.longestStreak}` : '—', beaten.longestStreak && run.longestStreak > 1],
+    ];
+    if (run.timeBonus) {
+      rows.push([`Time bonus (${Math.floor(run.secondsLeft)}s left)`, `+${run.timeBonus}`, true]);
+    }
+    this.el('sc-rows').innerHTML = rows.map(([k, v, hot]) =>
+      `<tr><td>${k}</td><td class="${hot ? 'hot' : ''}">${v}${hot ? ' ★' : ''}</td></tr>`
+    ).join('');
+
+    // Medals are the run's headline when there are any — a first 700m hit
+    // matters more to a player than the points it happened to be worth.
+    this.el('sc-medals').innerHTML = newMedals.length
+      ? newMedals.map((m) =>
+          `<div class="medal"><b>${m.name}</b><span>${m.desc}</span></div>`).join('')
+      : '';
+    this.el('sc-medals').classList.toggle('empty', newMedals.length === 0);
+
+    const bestEl = this.el('sc-best');
+    if (beaten.score) {
+      bestEl.className = 'record';
+      bestEl.textContent = best ? `NEW BEST — beat ${best.score}` : 'NEW BEST';
+    } else {
+      bestEl.className = '';
+      bestEl.textContent = `Best ${best.score}  ·  ${best.score - run.score} short`;
+    }
+    bestEl.textContent += `   ·   Medals ${medalCount}/${MEDALS.length}`;
+
+    el.classList.remove('hidden');
+    clearTimeout(this._scorecardT);
+    this._scorecardT = setTimeout(() => el.classList.add('hidden'), CONFIG.session.scorecardMs);
+  }
+
+  // ---------------------------------------------------------------- score
+  setScore(score, streak = 0) {
+    this.el('score-value').textContent = String(score);
+    const el = this.el('score-streak');
+    el.textContent = streak > 1 ? `x${streak}` : '';
+    el.classList.toggle('hot', streak >= 3);
   }
 
   // --------------------------------------------------------------- compass
@@ -327,6 +557,12 @@ export class HUD {
 
   /** Swaps the loading screen out for the real start screen — called once
    *  every requested asset has settled (see Game.js / assets.js). */
+  /** Hides the survival readouts on the practice range — stats, clock,
+   *  objective and inventory mean nothing there and only add noise. */
+  setRangeMode(on) {
+    document.getElementById('hud').classList.toggle('range-mode', on);
+  }
+
   hideLoading() {
     this.el('loading-screen').classList.add('hidden');
     this.el('start-screen').classList.remove('hidden');
@@ -363,6 +599,7 @@ export class HUD {
   showPause(visible, onResume) {
     const screen = this.el('pause-screen');
     screen.classList.toggle('hidden', !visible);
+
     // Not a one-shot listener: browsers impose a brief cooldown on
     // re-requesting pointer lock right after an Escape-driven unlock, so
     // the first click can silently fail to actually resume. Keep the

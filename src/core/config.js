@@ -2,7 +2,7 @@
 
 export const CONFIG = {
   dayLengthSec: 720,        // one full day-night cycle = 12 real minutes
-  startTimeOfDay: 0.02,     // ~00:29, deep night — the crash just happened
+  startTimeOfDay: 0.36,     // ~08:38 — full daylight, sun still low enough to read the ground
 
   player: {
     walkSpeed: 4.3,
@@ -49,38 +49,102 @@ export const CONFIG = {
     range: 150,
     // Bullet drop physics (see Weapon.js's _updateBullets). muzzleVelocity is
     // a real researched figure (168gr .308 Win Federal Gold Medal Match,
-    // 2650 fps). bulletGravity is NOT real gravity (9.81) — a real .308 only
-    // drops a few centimeters over 100-400m, far too subtle to read on a
-    // scope reticle at any sane magnification. Instead it's solved backward
-    // from the scope-reticle.svg BDC ladder's actual drawn geometry (mark
-    // N sits at angle θ_N = markOffsetUnits(N) * (66/200 reticle-to-vmin
-    // scale) * (26°/100 FOV-per-vh) above center, using vmin≈vh in
-    // landscape) via the small-angle drop relation θ(R) = 0.5·g·R/v², so
-    // that holding mark N on a target ranged at exactly 100·N meters (via
-    // the scope's own rangefinder) lands the shot dead-on. Recompute this
-    // if the reticle geometry, scope FOV, or muzzleVelocity ever changes.
+    // 2650 fps). bulletGravity is NOT real gravity — a real .308 drops only
+    // ~7cm over 100m, which is 0.04° of holdover: invisible on any reticle
+    // at any sane magnification. It's instead solved backward from the
+    // scope-reticle.svg BDC ladder's drawn geometry, so holding mark N on a
+    // target the scope ranges at 100·N metres lands the shot dead-on:
+    //
+    //   angle per reticle unit = (66/200 reticle-to-vmin) · (26°/100 FOV-per-vh)
+    //                          = 0.0858°            [vmin ≈ vh in landscape]
+    //   ladder spacing         = 6 units per 100 m  = 0.5148° at 100 m
+    //   small-angle drop       = tan θ = ½·g·R/v²
+    //   ⇒ g = 2·v²·tan θ / R  = 2·808²·0.0089852 / 100 ≈ 117
+    //
+    // At 12x real gravity that's still exaggerated, but it's a third of the
+    // 36x the old coarse 18-unit ladder forced — tightening the ladder is
+    // what bought the realism. Recompute this if the ladder spacing, the
+    // reticle's on-screen size, the scope FOV or muzzleVelocity change.
     muzzleVelocity: 808,
-    bulletGravity: 352,
+    bulletGravity: 117,
     bulletLifetime: 4, // seconds before an unresolved shot is given up on
+    // Crosswind. A real bullet is pushed by the difference between its own
+    // flight and the moving air, which over short flights behaves like a
+    // near-constant sideways acceleration — so drift grows with the square
+    // of time of flight, exactly like drop, and is negligible up close but
+    // decisive far out. windDrift is that acceleration per m/s of wind:
+    //   drift = ½ · (windDrift · windSpeed) · t²
+    // Tuned against plate sizes rather than picked: at 2.6 a 5 m/s
+    // crosswind moves a 500m shot ~2.5m against a 1.75m plate half-width —
+    // a clean miss if ignored — while at 100m it's 10cm and irrelevant. The
+    // earlier 1.5 drifted less than a plate's half-width at every range, so
+    // wind was purely decorative.
+    windDrift: 2.6,
   },
 
   wolf: {
-    health: 3,
+    health: 2,              // body shots: two hits down. Headshots always instakill regardless.
+    headshotRadius: 0.35,    // world units around the head bone counted as a headshot
     chaseSpeed: 6.1,
     wanderSpeed: 1.7,
-    detectRadiusDay: 24,
-    detectRadiusNight: 30,
+    // 20m aggro. Night is unchanged rather than longer: the wolves guard a
+    // fixed spot (the lake) now, so a wider night radius would just mean
+    // being ambushed before the lake is even visible.
+    detectRadiusDay: 20,
+    detectRadiusNight: 20,
     crouchDetectMult: 0.65, // sneaking narrows how far a wolf notices you
     proneDetectMult: 0.4,
     giveUpRadius: 55,
     attackRange: 2.4,
     attackCooldown: 1.5,
     damage: 14,
+    woundedSpeedMult: 0.45, // after surviving a body shot, until finished off
+    // Death throw. There's no death clip in the wolf GLB, so rather than a
+    // bad imitation of one the corpse gets launched along the bullet's path
+    // and tumbles away.
+    ragdoll: {
+      launchSpeed: 24,  // along the shot direction
+      launchUp: 15,
+      gravity: 26,      // heavier than real, so the arc stays readable
+      bounce: 0.55,
+      despawnSec: 12,
+    },
+  },
+
+  // Timed range session (see world/Range.js). Seconds are real seconds: the
+  // clock keeps running while focus slows the world, so slow motion costs
+  // you something instead of being free.
+  session: {
+    seconds: 120,
+    clearBonusPerSecond: 25, // clearing the range early banks the time left
+    scorecardMs: 12000,
+  },
+
+  // Hold-breath focus (see player/Focus.js). Seconds are real seconds.
+  focus: {
+    holdSeconds: 5,
+    cooldownSeconds: 20,
+    timeScale: 0.4,   // the world crawls; your five seconds buy more of it
+    swayMult: 0.12,   // the actual reward — the reticle all but stops moving
+  },
+
+  // Slow-motion third-person bullet cam (see core/KillCam.js).
+  killcam: {
+    // Only a wolf headshot or a dead-centre plate can earn the camera at
+    // all — and even then only sometimes. Firing on every good shot made it
+    // routine, and a cinematic that plays every few seconds stops reading as
+    // a reward and starts reading as an interruption.
+    chance: 0.3,
+    minDistance: 15,   // closer than this there's no flight worth watching
+    flightSeconds: 2.4, // real seconds the slowed flight should fill
+    impactHold: 1.15,   // real seconds to linger on the strike
   },
 
   fire: {
     woodCost: 3,
     burnTimeSec: 300,       // one fire covers roughly one night
+    dieDownSec: 45,         // over the last N seconds of fuel, flames visibly shrink
+    wreckBurnHours: 6,      // in-game hours before the helicopter fire burns out, leaving smoke
     warmRadius: 5.5,
   },
 };
