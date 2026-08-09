@@ -99,7 +99,8 @@ export class HUD {
           <p class="story">The helicopter went down at first light. It's still burning.<br>
           West of the wreck someone cut a firing lane into the hillside —
           steel plates from 25 to 500 metres.<br>
-          Range them, read the wind, and see what you can hit.<br>
+          Range them, read the wind, and see what you can hit. Three drones
+          patrol overhead — three hits each, and they smoke before they fall.<br>
           The post at the firing line starts a timed run — everything resets,
           two minutes on the clock, and your best is kept. Miss, and the
           spotter calls the correction.</p>

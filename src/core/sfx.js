@@ -95,6 +95,22 @@ export class SFX {
     osc.stop(t + 0.2);
   }
 
+  /** Something coming apart: a low thud under a burst of noise. */
+  boom() {
+    if (!this.ctx) return;
+    this._blip(70, 0.5, 0.32, 'sine');
+    this._blip(46, 0.7, 0.26, 'triangle', 0.03);
+    const g = this.ctx.createGain();
+    const src = this.ctx.createBufferSource();
+    src.buffer = this._noise(0.45);
+    const lp = this.ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.value = 900;
+    src.connect(lp).connect(g).connect(this.master);
+    this._env(g, this.ctx.currentTime, 0.4, 0.42);
+    src.start();
+  }
+
   /** Run-clock countdown. Dry enough not to be mistaken for a hit. */
   tick() { this._blip(880, 0.05, 0.11, 'triangle'); }
 

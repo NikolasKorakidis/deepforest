@@ -350,7 +350,8 @@ export class Weapon {
       if (!hit) continue;
 
       let obj = hit.object;
-      while (obj && !obj.userData.wolfRef && !obj.userData.rangeTarget) obj = obj.parent;
+      while (obj && !obj.userData.wolfRef && !obj.userData.rangeTarget
+        && !obj.userData.droneRef) obj = obj.parent;
       if (!obj) return null; // terrain or scenery — nothing to celebrate
 
       const point = hit.point.clone();
@@ -358,6 +359,13 @@ export class Weapon {
       if (wolf && !wolf.dead && wolf.isHeadshot(point)) {
         return { kind: 'HEADSHOT', point, flightTime: t };
       }
+      // The shot that finishes a drone is worth watching: it's the only
+      // target that comes apart and falls, and you only get one per drone.
+      const drone = obj.userData.droneRef;
+      if (drone && !drone.dead && drone.hp === 1) {
+        return { kind: 'DRONE DOWN', point, flightTime: t };
+      }
+
       const target = obj.userData.rangeTarget;
       if (target && target.up && !target.knocked && target.isBullseye(point)) {
         return { kind: 'BULLSEYE', point, flightTime: t };

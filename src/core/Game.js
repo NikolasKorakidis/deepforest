@@ -92,7 +92,9 @@ export class Game {
       getWind: () => this.wind,
       getFocus: () => this.focus,
       // Plates and balloons both, so a missed balloon gets called too.
-      getTargets: () => (this.range ? [...this.range.targets, ...this.range.balloons] : []),
+      getTargets: () => (this.range
+        ? [...this.range.targets, ...this.range.balloons, ...this.range.drones]
+        : []),
     });
     this.campfires = new CampfireSystem(
       this.scene, this.sfx, this.interactions,
@@ -438,6 +440,7 @@ export class Game {
       score: this.range.score,
       rangeKnocked: this.range.knockedDistances,
       rangePopped: this.range.poppedBalloons,
+      rangeDrones: this.range.droneDamage,
       player: {
         x: this.controller.position.x,
         y: this.controller.position.y,
@@ -491,6 +494,7 @@ export class Game {
     if (data.score) { this.range.score = data.score; this.hud.setScore(data.score, 0); }
     this.range.restore(data.rangeKnocked ?? []);
     this.range.restoreBalloons(data.rangePopped ?? []);
+    this.range.restoreDrones(data.rangeDrones ?? []);
 
 
     for (const f of data.campfires) this.campfires.rebuild(f.x, f.z, f.fuel, this.hud);

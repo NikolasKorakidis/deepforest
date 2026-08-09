@@ -111,6 +111,18 @@ export const CONFIG = {
     },
   },
 
+  // Patrolling quadcopter targets (see world/Drone.js).
+  drone: {
+    hitsToKill: 3,
+    // Height a crippled drone is allowed to lose. Not cosmetic: the patrol
+    // circuits are verified to clear every plate sightline *including* this
+    // much sag, so raising it can put a wounded drone in front of a plate.
+    sagMax: 6,
+    wreckSeconds: 4,
+    hitPoints: 25,   // on top of the distance points, as a moving target
+    killMultiplier: 2,
+  },
+
   // Timed range session (see world/Range.js). Seconds are real seconds: the
   // clock keeps running while focus slows the world, so slow motion costs
   // you something instead of being free.
