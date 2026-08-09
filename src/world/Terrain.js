@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import {
-  terrainHeight, fbm, smoothstep, forestDensity, WORLD, POND, POND_RADIUS,
+  terrainHeight, fbm, smoothstep, forestDensity, raycastTerrain,
+  WORLD, POND, POND_RADIUS,
 } from './heightfield.js';
 
 /**
@@ -61,5 +62,30 @@ export function createTerrain() {
   const mesh = new THREE.Mesh(geo, mat);
   mesh.receiveShadow = true;
   mesh.name = 'terrain';
+
+  // Range this against the heightfield, not against its own 319k triangles.
+  // three.js has no BVH, so the stock raycast tests every triangle — 13.3ms
+  // per ray, measured, which is the entire frame budget. The game fires rays
+  // constantly (the scope rangefinder every frame while aiming, every bullet
+  // in flight every frame), so this one override is the difference between
+  // aiming being free and aiming costing more than everything else combined.
+  //
+  // Nothing reads `face`, `uv` or `normal` off a terrain hit, so distance,
+  // point and object are the whole contract. The analytic surface differs
+  // from the drawn mesh by at most 0.16m — its own tessellation error, and
+  // if anything the more correct of the two.
+  mesh.raycast = function (raycaster, intersects) {
+    const { origin: o, direction: d } = raycaster.ray;
+    const t = raycastTerrain(
+      o.x, o.y, o.z, d.x, d.y, d.z, raycaster.near, raycaster.far
+    );
+    if (t < 0) return;
+    intersects.push({
+      distance: t,
+      point: o.clone().addScaledVector(d, t),
+      object: this,
+    });
+  };
+
   return mesh;
 }

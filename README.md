@@ -339,6 +339,23 @@ Design notes:
     puzzle. Verified end to end by integrating the real trajectory: every
     target from 25m to 500m lands inside its plate, and 100m–500m land
     within 2cm of plate centre.
+- **The terrain mesh is never raycast.** It is one 319,000-triangle mesh and
+  three.js has no BVH, so the stock raycast tests every triangle: 13.4ms per
+  ray, measured. The game casts rays constantly — the scope's rangefinder
+  once per frame while aiming, every bullet in flight once per frame, and the
+  kill-cam predictor a few dozen in the single frame you pull the trigger.
+  That last one measured **295ms**: a third of a second frozen, per shot.
+  `raycastTerrain` in heightfield.js solves the intersection against the
+  height function the mesh was built from instead, by sphere-tracing with a
+  step bounded by the field's steepest measured gradient, so it cannot step
+  over a ridge. 79x and 149x faster respectively; a scoped frame with three
+  rounds in the air went from ~54ms of raycasting to ~0.7ms.
+  Checked against the mesh over 4,460 rays: 98.2% agree within 1m, the median
+  difference is 7mm, and **not one** analytic hit landed further away than the
+  mesh's — every disagreement is the march stopping on real ground that the
+  1.55m tessellation had smoothed flat, which is the safe direction. Nothing
+  reads `face`, `uv` or `normal` off a terrain hit, so distance/point/object
+  is the entire contract.
 - Drones are deliberately **not** counted toward "range cleared". Simulating
   200 runs with them required showed a strong shooter falling from clearing
   every run to 47% of them, and an average shooter from 56% to 1% — which

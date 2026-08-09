@@ -234,3 +234,86 @@ export function forestDensity(x, z) {
  *  the vegetated play area (well within the ridge ring) so the walk there
  *  is through forest rather than up bare rock. */
 export const CHECKPOINT = { x: -78, z: -90 };
+
+// --------------------------------------------------------------- ray march
+
+// Steepest gradient anywhere in the heightfield, sampled over the whole world
+// at 1m spacing: 3.43 (73.7°). Rounded up for headroom — the march below is
+// only guaranteed not to tunnel through a ridge if this is a true upper bound.
+const MAX_SLOPE = 4;
+
+// Vertical extent of the ground, measured the same way: -8.3 to 65.2.
+const TERRAIN_MAX_Y = 68;
+const TERRAIN_MIN_Y = -12;
+
+const MARCH_LIMIT = 4000; // hard iteration cap; nothing legitimate approaches it
+
+/**
+ * Where a ray meets the ground, solved against the heightfield itself rather
+ * than against the mesh built from it.
+ *
+ * The terrain is one 319,000-triangle mesh with no acceleration structure, so
+ * three.js tests every triangle on every ray: 13.3ms a go, measured. That is
+ * the whole frame budget, and the game raycasts constantly — the scope's
+ * rangefinder runs one per frame while you're aiming, and every bullet in
+ * flight runs one per frame as well. Solving it analytically instead costs
+ * about 0.04ms, because `terrainHeight` is 0.083µs and this needs a few
+ * hundred samples at most.
+ *
+ * The march is sphere-tracing adapted to a heightfield: from a point `gap`
+ * metres above the ground, the gap can close no faster than
+ * `MAX_SLOPE · horizontalRate − dy` per unit of ray length, so stepping by
+ * `gap / thatRate` can never step over the surface. Once the gap goes
+ * negative the crossing is bisected to convergence.
+ *
+ * @returns distance along the ray, or -1 for a miss. Direction must be
+ *   normalised, so the return value is in metres.
+ */
+export function raycastTerrain(ox, oy, oz, dx, dy, dz, near = 0, far = Infinity) {
+  const horizRate = Math.hypot(dx, dz);
+  let t = Math.max(0, near);
+
+  const gapAt = (u) => (oy + dy * u) - terrainHeight(ox + dx * u, oz + dz * u);
+
+  let gap = gapAt(t);
+  if (gap <= 0) return t <= far ? t : -1; // starts on or under the ground
+
+  // Worst-case rate at which the ground can rise to meet the ray.
+  const closeRate = MAX_SLOPE * horizRate - dy;
+
+  for (let i = 0; i < MARCH_LIMIT && t < far; i++) {
+    const y = oy + dy * t;
+    // Climbing out above the highest ground, or already below the lowest:
+    // nothing further along the ray can be terrain.
+    if (dy >= 0 && y > TERRAIN_MAX_Y) return -1;
+    if (dy <= 0 && y < TERRAIN_MIN_Y) return -1;
+    // Left the ground horizontally. Bounded exactly at the world edge, not
+    // loosely: `terrainHeight` keeps returning values past it, but the mesh
+    // stops there, and reporting ground beyond the mesh's own extent is a
+    // hit on terrain that isn't drawn.
+    const x = ox + dx * t, z = oz + dz * t;
+    if (x < WORLD.minX || x > WORLD.maxX || z < WORLD.minZ || z > WORLD.maxZ) return -1;
+
+    // 0.95 rather than 1.0 so floating-point slop can't land us exactly on
+    // the surface and step past it; 0.25m floor keeps grazing rays moving.
+    const step = closeRate > 1e-6
+      ? Math.max(0.25, (gap / closeRate) * 0.95)
+      : 50; // ground can never catch this ray; advance freely toward the caps
+
+    const next = Math.min(t + step, far);
+    const nextGap = gapAt(next);
+
+    if (nextGap <= 0) {
+      let lo = t, hi = next;
+      for (let b = 0; b < 24; b++) {
+        const mid = (lo + hi) * 0.5;
+        if (gapAt(mid) > 0) lo = mid; else hi = mid;
+      }
+      return hi;
+    }
+    if (next >= far) return -1;
+    t = next;
+    gap = nextGap;
+  }
+  return -1;
+}
