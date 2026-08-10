@@ -339,6 +339,19 @@ Design notes:
     puzzle. Verified end to end by integrating the real trajectory: every
     target from 25m to 500m lands inside its plate, and 100m–500m land
     within 2cm of plate centre.
+- Settings live in their own localStorage slot, apart from the save, for the
+  same reason personal bests do: a setting is about the person, not the run,
+  and New Game should never hand someone back a mouse that no longer feels
+  like theirs. Stored values are clamped on read rather than trusted — that
+  storage is user-editable, and a sensitivity of 0 would leave the player
+  unable to turn around with nothing on screen explaining why.
+- The pause screen resumes on any click, so its controls have to opt out
+  twice over: once for clicks that land on them, and once for the click that
+  *ends* a drag begun on them, which is delivered to the screen rather than
+  to the slider. The flag doing that is cleared on every click, including the
+  ones on the controls — clearing it only on the swallowed path leaves it set
+  after an ordinary click on the slider, and eats the next click, the one
+  meant to resume.
 - **The terrain mesh is never raycast.** It is one 319,000-triangle mesh and
   three.js has no BVH, so the stock raycast tests every triangle: 13.4ms per
   ray, measured. The game casts rays constantly — the scope's rangefinder

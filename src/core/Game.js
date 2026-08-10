@@ -22,6 +22,7 @@ import { Range } from '../world/Range.js';
 import { Wind } from '../world/Wind.js';
 import { KillCam } from './KillCam.js';
 import { Focus } from '../player/Focus.js';
+import { loadSettings, saveSettings, SENSITIVITY } from './settings.js';
 
 import { allAssetsSettled, loadProgress } from './assets.js';
 
@@ -130,6 +131,21 @@ export class Game {
     // bullet, and a player who learns to read it is actually right.
     this.wind = new Wind();
     this.focus = new Focus({ input: this.input });
+
+    // Restored and applied before the first frame, so the very first mouse
+    // movement already uses the player's own setting rather than snapping to
+    // it once they happen to open the pause menu.
+    this.settings = loadSettings();
+    this.controller.sensitivity = this.settings.sensitivity;
+    this.hud.bindSettings({
+      sensitivity: this.settings.sensitivity,
+      range: SENSITIVITY,
+      onSensitivity: (v) => {
+        this.controller.sensitivity = v;
+        this.settings.sensitivity = v;
+        saveSettings(this.settings);
+      },
+    });
     this.range = new Range({
       scene: this.scene, hud: this.hud, sfx: this.sfx,
       interactions: this.interactions, weapon: this.weapon,

@@ -28,6 +28,12 @@ export class PlayerController {
     this.crouchToggled = false; // KeyC toggles; Ctrl still crouches only while held
     this.proneToggled = false; // KeyZ toggles
 
+    // Multiplier on CONFIG.player.lookSensitivity, owned by the pause menu's
+    // slider (see core/settings.js). Lives here rather than being read out of
+    // CONFIG so the config stays the shipped tuning and this stays the
+    // player's preference on top of it.
+    this.sensitivity = 1;
+
     // Set by Game while the scope is up: Shift means hold-breath there, not
     // sprint, and the two can't both own the key.
     this.blockSprint = false;
@@ -60,8 +66,9 @@ export class PlayerController {
     const { dx, dy } = this.input.consumeMouseDelta();
     this.lookDX = dx;
     this.lookDY = dy;
-    this.yaw -= dx * P.lookSensitivity;
-    this.pitch = clamp(this.pitch - dy * P.lookSensitivity, -1.45, 1.45);
+    const look = P.lookSensitivity * this.sensitivity;
+    this.yaw -= dx * look;
+    this.pitch = clamp(this.pitch - dy * look, -1.45, 1.45);
 
     // --- move ---
     const f = (this.input.isDown('KeyW') ? 1 : 0) - (this.input.isDown('KeyS') ? 1 : 0);
