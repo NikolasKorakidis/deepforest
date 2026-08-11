@@ -74,12 +74,28 @@ export const CONFIG = {
     // of time of flight, exactly like drop, and is negligible up close but
     // decisive far out. windDrift is that acceleration per m/s of wind:
     //   drift = ½ · (windDrift · windSpeed) · t²
-    // Tuned against plate sizes rather than picked: at 2.6 a 5 m/s
-    // crosswind moves a 500m shot ~2.5m against a 1.75m plate half-width —
-    // a clean miss if ignored — while at 100m it's 10cm and irrelevant. The
-    // earlier 1.5 drifted less than a plate's half-width at every range, so
-    // wind was purely decorative.
-    windDrift: 2.6,
+    //
+    // Set so wind carries the same weight against drop that it does in life.
+    // Simulating a real .308 (168gr GMM, G7 0.218, point-mass with the G7
+    // drag function) puts real drift at 0.31–0.34 of real drop across this
+    // range. In here both drift and drop grow as t², so their ratio is just
+    //   windDrift · windSpeed / bulletGravity
+    // which at a 5 m/s wind is windDrift · 0.0427 — so 7.5 gives 0.321,
+    // inside the real band.
+    //
+    // The old 2.6 sat at 0.111: with drop already exaggerated ~8x at 700m
+    // and wind only ~2.6x, holdover dominated and wind was a rounding error,
+    // which inverts real long-range shooting — there, drop is arithmetic you
+    // solve once and wind is the thing that actually decides the shot.
+    //
+    // Checked against the targets and the reticle's windage ladder, whose
+    // marks are the same 0.5148° as the elevation ones: at 25m even a full
+    // gust is 3cm (rightly ignorable), at 100m it is 0.7 of a plate
+    // half-width, and at 700m it runs 0.9 marks in a light breeze to 3.2 in
+    // a gust — a 7-half-width miss if ignored, and still inside the ladder's
+    // 5 marks of holdoff. At 2.6 nothing ever needed more than 1.1 marks, so
+    // four fifths of the drawn ladder was decoration.
+    windDrift: 7.5,
   },
 
   wolf: {

@@ -105,8 +105,9 @@ not part of the running game — see the tree/lake design note below.
 9. **Read the wind** — the dial top-right shows wind *relative to where
    you're looking*: straight up means it's blowing away from you, right
    means it will carry the bullet right. The windsocks down the lane say the
-   same thing in the world. Under 200m wind is negligible; at 400m and 500m
-   ignoring it is a clean miss.
+   same thing in the world. Under 100m wind is negligible; past 300m it
+   decides the shot — at 700m a gust pushes a round seven plate half-widths
+   wide, so the reticle's windage marks are there to be used, not admired.
 10. **Kill cam** — occasionally the world drops into slow motion and the
    camera pulls off your shoulder to chase the round in. Only a wolf
    headshot or a plate struck dead centre can earn it, and even then only
@@ -414,6 +415,16 @@ Design notes:
   crawl. Shift is likewise arbitrated rather than shared — `blockSprint`
   hands the key to the breath hold while the scope is up, since sprinting
   and steadying a rifle are not things you do at once.
+- Wind's strength is set against *drop* rather than picked for feel.
+  Simulating a real .308 with the G7 drag function puts real drift at
+  0.31–0.34 of real drop across this range; since both drift and drop grow
+  as t² here, their ratio is just `windDrift · windSpeed / bulletGravity`,
+  and 7.5 lands on 0.321. The previous 2.6 sat at 0.111, which inverted real
+  long-range shooting: drop is arithmetic you solve once, wind is the thing
+  that actually decides the shot, and with drop exaggerated ~8x and wind
+  only ~2.6x the game had it the other way round. The reticle agrees — its
+  windage ladder carries five marks a side, and at 2.6 nothing ever asked
+  for more than 1.1 of them.
 - Wind is one object read by three unrelated consumers — the bullet solver,
   the grass shader and the HUD dial. That sharing is the whole design: what
   the dial shows *is* the vector that pushes the bullet, so a player who

@@ -111,7 +111,7 @@ export class HUD {
             <span><b>LMB</b> fire</span><span><b>RMB</b> toggle aim / zoom</span>
             <span><b>R</b> reload</span><span><b>1 / 2</b> rifle / binoculars</span>
             <span><b>F</b> eat ration</span><span><b>T</b> build campfire</span>
-            <span><b>Wind</b> dial, top right</span><span><b>Scope</b> marks = 100m each</span>
+            <span><b>Wind</b> dial + windage marks</span><span><b>Scope</b> marks = 100m each</span>
             <span><b>E</b> at the post: timed run</span><span><b>Esc</b> pause / settings</span>
           </div>
           <p class="begin" id="begin-fresh">CLICK TO BEGIN</p>
