@@ -22,6 +22,7 @@ import { Range } from '../world/Range.js';
 import { Wind } from '../world/Wind.js';
 import { KillCam } from './KillCam.js';
 import { Focus } from '../player/Focus.js';
+import { loadSettings, saveSettings, SENSITIVITY } from './settings.js';
 
 import { allAssetsSettled, loadProgress } from './assets.js';
 
@@ -92,7 +93,9 @@ export class Game {
       getWind: () => this.wind,
       getFocus: () => this.focus,
       // Plates and balloons both, so a missed balloon gets called too.
-      getTargets: () => (this.range ? [...this.range.targets, ...this.range.balloons] : []),
+      getTargets: () => (this.range
+        ? [...this.range.targets, ...this.range.balloons, ...this.range.drones]
+        : []),
     });
     this.campfires = new CampfireSystem(
       this.scene, this.sfx, this.interactions,
@@ -128,6 +131,21 @@ export class Game {
     // bullet, and a player who learns to read it is actually right.
     this.wind = new Wind();
     this.focus = new Focus({ input: this.input });
+
+    // Restored and applied before the first frame, so the very first mouse
+    // movement already uses the player's own setting rather than snapping to
+    // it once they happen to open the pause menu.
+    this.settings = loadSettings();
+    this.controller.sensitivity = this.settings.sensitivity;
+    this.hud.bindSettings({
+      sensitivity: this.settings.sensitivity,
+      range: SENSITIVITY,
+      onSensitivity: (v) => {
+        this.controller.sensitivity = v;
+        this.settings.sensitivity = v;
+        saveSettings(this.settings);
+      },
+    });
     this.range = new Range({
       scene: this.scene, hud: this.hud, sfx: this.sfx,
       interactions: this.interactions, weapon: this.weapon,
@@ -438,6 +456,7 @@ export class Game {
       score: this.range.score,
       rangeKnocked: this.range.knockedDistances,
       rangePopped: this.range.poppedBalloons,
+      rangeDrones: this.range.droneDamage,
       player: {
         x: this.controller.position.x,
         y: this.controller.position.y,
@@ -491,6 +510,7 @@ export class Game {
     if (data.score) { this.range.score = data.score; this.hud.setScore(data.score, 0); }
     this.range.restore(data.rangeKnocked ?? []);
     this.range.restoreBalloons(data.rangePopped ?? []);
+    this.range.restoreDrones(data.rangeDrones ?? []);
 
 
     for (const f of data.campfires) this.campfires.rebuild(f.x, f.z, f.fuel, this.hud);

@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { submitRun } from '../core/records.js';
 import { terrainHeight, RANGE, rangeTargetSpots } from './heightfield.js';
 import { CONFIG } from '../core/config.js';
+import { Drone, DRONE_CIRCUITS } from './Drone.js';
 
 const _v = new THREE.Vector3(); // scratch, reused by centre()/isBullseye()
 
@@ -267,6 +268,16 @@ class Balloon {
     this.balloon.castShadow = true;
     this.balloon.userData.onShot = () => this.pop();
     this.balloon.userData.balloon = this;
+    // A popped balloon is hidden, but hidden is not the same as gone: three.js
+    // still raycasts invisible meshes, so without this the burst would leave
+    // an invisible obstacle hanging over the lane that quietly ate rounds
+    // aimed at anything behind it.
+    const meshRaycast = THREE.Mesh.prototype.raycast;
+    const self = this;
+    this.balloon.raycast = function (raycaster, intersects) {
+      if (self.popped) return;
+      meshRaycast.call(this, raycaster, intersects);
+    };
     this.group.add(this.balloon);
 
     const knot = new THREE.Mesh(
@@ -594,6 +605,17 @@ export class Range {
       });
     }
 
+    // Quadcopters, one per engagement band. Their circuits sit above the
+    // sightline to the 700m plate — the upper envelope of every line of
+    // sight here — so a drone is always against sky and never in front of
+    // something you're trying to range. See Drone.js for the clearances.
+    this.drones = DRONE_CIRCUITS.map((c, i) => {
+      const d = new Drone(c, RANGE.laneX, RANGE.firingZ, (i * Math.PI * 2) / DRONE_CIRCUITS.length);
+      d.onHit = (drone) => this._registerDroneHit(drone);
+      scene.add(d.group, d.smokeGroup);
+      return d;
+    });
+
     // Start post, mirroring the ammo crate on the other side of the line.
     const postX = RANGE.laneX - 4.5;
     const postZ = RANGE.firingZ + 4;
@@ -636,6 +658,7 @@ export class Range {
   startSession() {
     for (const t of this.targets) t.reset();
     for (const b of this.balloons) b.reset();
+    for (const d of this.drones) d.reset();
     this.streak = 0;
     this.streakTimer = 0;
 
@@ -707,6 +730,38 @@ export class Range {
       + this.balloons.filter((b) => !b.popped).length;
   }
 
+  /**
+   * A hit on a drone — one of three, so this fires more than once per target.
+   *
+   * Deliberately absent from `remaining`: drones do not gate "range cleared".
+   * Requiring nine more hits inside the two minutes drops a strong shooter
+   * from clearing every run to under half of them, and an average one from
+   * 56% to 1% — which would quietly retire the Clean Sweep and Quick Work
+   * medals for almost everyone. They're an opportunity during a run, not a
+   * gate on finishing it.
+   */
+  _registerDroneHit(drone) {
+    this.streak = this.streakTimer > 0 ? Math.min(5, this.streak + 1) : 1;
+    this.streakTimer = 6;
+
+    const killed = drone.dead;
+    const base = pointsFor(drone.dist) + CONFIG.drone.hitPoints;
+    const gained = base * this.streak * (killed ? CONFIG.drone.killMultiplier : 1);
+    this.score += gained;
+    this.hits++;
+
+    if (killed) {
+      this.sfx.boom();
+      this.hud.toast(`DRONE DOWN  ${drone.dist}m  +${gained}`, 2400);
+    } else {
+      this.sfx.ding();
+      const state = drone.damage === 1 ? 'hit — trailing smoke' : 'hit — losing it';
+      this.hud.toast(`Drone ${drone.dist}m  ${state}  +${gained}`, 1600);
+    }
+    this.hud.setScore(this.score, this.streak);
+    this._recordShot(gained, drone.dist);
+  }
+
   _registerPop(balloon) {
     this.streak = this.streakTimer > 0 ? Math.min(5, this.streak + 1) : 1;
     this.streakTimer = 6;
@@ -731,6 +786,23 @@ export class Range {
 
   get poppedBalloons() {
     return this.balloons.filter((b) => b.popped).map((b) => b.dist);
+  }
+
+  /** Drone damage survives a reload for the same reason plate hits do:
+   *  otherwise the score persists while the targets come back whole, and the
+   *  same drone can be shot down repeatedly for points. */
+  get droneDamage() {
+    return this.drones.map((d) => d.hp);
+  }
+
+  restoreDrones(hps = []) {
+    hps.forEach((hp, i) => {
+      const d = this.drones[i];
+      if (!d || hp >= CONFIG.drone.hitsToKill) return;
+      d.hp = Math.max(0, hp);
+      d.wobble = d.damage;
+      if (d.hp <= 0) { d.dead = true; d.exploded = true; d.group.visible = false; }
+    });
   }
 
   restore(distances = []) {
@@ -802,6 +874,7 @@ export class Range {
   update(dt, wind, realDt = 0) {
     for (const t of this.targets) t.update(dt);
     for (const b of this.balloons) b.update(dt, wind);
+    for (const d of this.drones) d.update(dt, wind);
     if (wind) for (const s of this.socks) s.update(wind);
 
     if (this.streakTimer > 0) {

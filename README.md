@@ -86,30 +86,38 @@ not part of the running game — see the tree/lake design note below.
    plinking. At the end you get a scorecard, and your best is kept. Six
    medals name different ways to shoot well — some of which deliberately
    pull against each other, so no single run can collect them all.
-6. **Listen to the spotter** — miss a plate past 60m and the call comes back
+6. **Bring down the drones** — three quadcopters patrol above the lane at
+   120m, 250m and 400m. They're the only targets that move under power, so
+   they're the only ones that teach *lead*: at 400m the round is half a
+   second in the air, which is several metres of crossing. Three hits each,
+   and the damage is readable through the scope rather than from a bar —
+   white smoke after one, dark smoke and a visible wallow after two, then it
+   comes down. They score but don't gate clearing the range.
+7. **Listen to the spotter** — miss a plate past 60m and the call comes back
    under the reticle: `1.2m LOW   0.8m RIGHT`, or `48m SHORT` if the round
    buried itself in front. It reports the miss, not the correction, the way a
    real spotter does — inverting it is the part worth learning.
-7. **Hold your breath** — with the scope settled, hold **Shift**: the world
+8. **Hold your breath** — with the scope settled, hold **Shift**: the world
    drops to 40% speed and the reticle all but stops wandering for five
    seconds. That's the window for the shot you couldn't otherwise take — a
    plate about to drop, or a balloon swinging on its tether. It then needs
    twenty seconds to recover, and letting go early doesn't bank any of it.
-8. **Read the wind** — the dial top-right shows wind *relative to where
+9. **Read the wind** — the dial top-right shows wind *relative to where
    you're looking*: straight up means it's blowing away from you, right
    means it will carry the bullet right. The windsocks down the lane say the
-   same thing in the world. Under 200m wind is negligible; at 400m and 500m
-   ignoring it is a clean miss.
-9. **Kill cam** — occasionally the world drops into slow motion and the
+   same thing in the world. Under 100m wind is negligible; past 300m it
+   decides the shot — at 700m a gust pushes a round seven plate half-widths
+   wide, so the reticle's windage marks are there to be used, not admired.
+10. **Kill cam** — occasionally the world drops into slow motion and the
    camera pulls off your shoulder to chase the round in. Only a wolf
    headshot or a plate struck dead centre can earn it, and even then only
    30% of the time (`CONFIG.killcam.chance`) — rare enough to stay a
    moment rather than a routine.
-10. **Score** — each plate is worth `10 + distance/10`, so the 500m plate pays
+11. **Score** — each plate is worth `10 + distance/10`, so the 500m plate pays
    about five times the 25m one. Dead centre doubles it. Chained hits build a multiplier up to x5;
    let six seconds lapse without a hit and it resets. Watch where your
    misses kick up dust — that's how you learn the hold.
-11. **The wilderness is still there** — gather wood (E at any tree), build a
+12. **The wilderness is still there** — gather wood (E at any tree), build a
    fire (T), cook and sleep at it, drink at the lake. Six wolves hold the
    water and the ridge above it; a headshot drops one instantly, a body shot
    wounds and slows it.
@@ -332,6 +340,53 @@ Design notes:
     puzzle. Verified end to end by integrating the real trajectory: every
     target from 25m to 500m lands inside its plate, and 100m–500m land
     within 2cm of plate centre.
+- Settings live in their own localStorage slot, apart from the save, for the
+  same reason personal bests do: a setting is about the person, not the run,
+  and New Game should never hand someone back a mouse that no longer feels
+  like theirs. Stored values are clamped on read rather than trusted — that
+  storage is user-editable, and a sensitivity of 0 would leave the player
+  unable to turn around with nothing on screen explaining why.
+- The pause screen resumes on any click, so its controls have to opt out
+  twice over: once for clicks that land on them, and once for the click that
+  *ends* a drag begun on them, which is delivered to the screen rather than
+  to the slider. The flag doing that is cleared on every click, including the
+  ones on the controls — clearing it only on the swallowed path leaves it set
+  after an ordinary click on the slider, and eats the next click, the one
+  meant to resume.
+- **The terrain mesh is never raycast.** It is one 319,000-triangle mesh and
+  three.js has no BVH, so the stock raycast tests every triangle: 13.4ms per
+  ray, measured. The game casts rays constantly — the scope's rangefinder
+  once per frame while aiming, every bullet in flight once per frame, and the
+  kill-cam predictor a few dozen in the single frame you pull the trigger.
+  That last one measured **295ms**: a third of a second frozen, per shot.
+  `raycastTerrain` in heightfield.js solves the intersection against the
+  height function the mesh was built from instead, by sphere-tracing with a
+  step bounded by the field's steepest measured gradient, so it cannot step
+  over a ridge. 79x and 149x faster respectively; a scoped frame with three
+  rounds in the air went from ~54ms of raycasting to ~0.7ms.
+  Checked against the mesh over 4,460 rays: 98.2% agree within 1m, the median
+  difference is 7mm, and **not one** analytic hit landed further away than the
+  mesh's — every disagreement is the march stopping on real ground that the
+  1.55m tessellation had smoothed flat, which is the safe direction. Nothing
+  reads `face`, `uv` or `normal` off a terrain hit, so distance/point/object
+  is the entire contract.
+- Drones are deliberately **not** counted toward "range cleared". Simulating
+  200 runs with them required showed a strong shooter falling from clearing
+  every run to 47% of them, and an average shooter from 56% to 1% — which
+  would have quietly retired the Clean Sweep and Quick Work medals for
+  almost everyone. They're an opportunity inside a run, not a gate on it.
+- Drone patrol circuits are verified against all twelve plate sightlines over
+  the whole excursion envelope — peak gust blowing them off station, the
+  lurching a crippled one does, and the full height it sags before going
+  down, all applied at once. Nearest approach is 8.6m. They also fly above
+  the sightline to the 700m plate, which is the upper envelope of every line
+  of sight here, so they sit against sky rather than in front of anything.
+- Hits register on a single invisible proxy box, not on the visible airframe.
+  three.js raycasts on geometry and layers rather than on `visible` (checked
+  against three 0.170), so this both works and is a hazard: a destroyed drone
+  is hidden but would go on stopping bullets in mid-air, which is why its
+  proxy also disables its own `raycast` once it's down. The same latent bug
+  applied to popped balloons and is fixed here too.
 - The spotter picks which target you meant by **azimuth alone**, ignoring
   elevation. The obvious test — nearest target to the aim ray in 3D — is
   quietly wrong, because a correct hold isn't pointed at the plate: with this
@@ -360,6 +415,16 @@ Design notes:
   crawl. Shift is likewise arbitrated rather than shared — `blockSprint`
   hands the key to the breath hold while the scope is up, since sprinting
   and steadying a rifle are not things you do at once.
+- Wind's strength is set against *drop* rather than picked for feel.
+  Simulating a real .308 with the G7 drag function puts real drift at
+  0.31–0.34 of real drop across this range; since both drift and drop grow
+  as t² here, their ratio is just `windDrift · windSpeed / bulletGravity`,
+  and 7.5 lands on 0.321. The previous 2.6 sat at 0.111, which inverted real
+  long-range shooting: drop is arithmetic you solve once, wind is the thing
+  that actually decides the shot, and with drop exaggerated ~8x and wind
+  only ~2.6x the game had it the other way round. The reticle agrees — its
+  windage ladder carries five marks a side, and at 2.6 nothing ever asked
+  for more than 1.1 of them.
 - Wind is one object read by three unrelated consumers — the bullet solver,
   the grass shader and the HUD dial. That sharing is the whole design: what
   the dial shows *is* the vector that pushes the bullet, so a player who

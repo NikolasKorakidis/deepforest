@@ -95,6 +95,26 @@ export class SFX {
     osc.stop(t + 0.2);
   }
 
+  /** Something coming apart: a low thud under a burst of noise. */
+  boom() {
+    if (!this.ctx) return;
+    this._blip(70, 0.5, 0.32, 'sine');
+    this._blip(46, 0.7, 0.26, 'triangle', 0.03);
+    // _noise returns a source node with the buffer already attached — the
+    // same shape shot() and reload() use. Wrapping it in a second source
+    // node throws, and this runs inside the bullet update, so the exception
+    // takes the render loop down with it.
+    const t = this.ctx.currentTime;
+    const src = this._noise(0.45);
+    const lp = this.ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.value = 900;
+    const g = this.ctx.createGain();
+    this._env(g, t, 0.4, 0.42);
+    src.connect(lp).connect(g).connect(this.master);
+    src.start(t);
+  }
+
   /** Run-clock countdown. Dry enough not to be mistaken for a hit. */
   tick() { this._blip(880, 0.05, 0.11, 'triangle'); }
 

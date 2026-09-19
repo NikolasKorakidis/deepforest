@@ -99,7 +99,8 @@ export class HUD {
           <p class="story">The helicopter went down at first light. It's still burning.<br>
           West of the wreck someone cut a firing lane into the hillside —
           steel plates from 25 to 500 metres.<br>
-          Range them, read the wind, and see what you can hit.<br>
+          Range them, read the wind, and see what you can hit. Three drones
+          patrol overhead — three hits each, and they smoke before they fall.<br>
           The post at the firing line starts a timed run — everything resets,
           two minutes on the clock, and your best is kept. Miss, and the
           spotter calls the correction.</p>
@@ -110,8 +111,8 @@ export class HUD {
             <span><b>LMB</b> fire</span><span><b>RMB</b> toggle aim / zoom</span>
             <span><b>R</b> reload</span><span><b>1 / 2</b> rifle / binoculars</span>
             <span><b>F</b> eat ration</span><span><b>T</b> build campfire</span>
-            <span><b>Wind</b> dial, top right</span><span><b>Scope</b> marks = 100m each</span>
-            <span><b>E</b> at the post: timed run</span><span><b>Esc</b> pause</span>
+            <span><b>Wind</b> dial + windage marks</span><span><b>Scope</b> marks = 100m each</span>
+            <span><b>E</b> at the post: timed run</span><span><b>Esc</b> pause / settings</span>
           </div>
           <p class="begin" id="begin-fresh">CLICK TO BEGIN</p>
           <div id="save-choice" class="hidden">
@@ -124,6 +125,14 @@ export class HUD {
       <div id="pause-screen" class="screen hidden">
         <div class="panel">
           <h2>PAUSED</h2>
+          <div id="pause-settings">
+            <label class="setting" for="sens-slider">
+              <span class="setting-name">Mouse sensitivity</span>
+              <input id="sens-slider" type="range" />
+              <span class="setting-value" id="sens-value">1.00</span>
+            </label>
+            <button id="sens-reset" type="button">Reset</button>
+          </div>
           <p class="begin">CLICK TO RESUME</p>
         </div>
       </div>
@@ -157,6 +166,7 @@ export class HUD {
     this._toastCount = 0;
     this._scorecardT = null;
     this._spotterT = null;
+    this._settingsInteraction = false;
     this._pauseResumeHandler = null;
 
     this.el('retry-btn').addEventListener('click', () => location.reload());
@@ -596,9 +606,45 @@ export class HUD {
     }
   }
 
+  /**
+   * Wires the pause menu's settings once, at startup.
+   *
+   * @param initial   starting multiplier
+   * @param onChange  called with every new value as the slider moves, so the
+   *   change can be felt immediately on resuming rather than only after a
+   *   commit the player has no reason to expect.
+   */
+  bindSettings({ sensitivity, range, onSensitivity }) {
+    const slider = this.el('sens-slider');
+    slider.min = range.min;
+    slider.max = range.max;
+    slider.step = range.step;
+    slider.value = sensitivity;
+    this.el('sens-value').textContent = Number(sensitivity).toFixed(2);
+
+    const apply = (v) => {
+      const n = Number(v);
+      slider.value = n;
+      this.el('sens-value').textContent = n.toFixed(2);
+      onSensitivity(n);
+    };
+    slider.addEventListener('input', () => apply(slider.value));
+    this.el('sens-reset').addEventListener('click', () => apply(range.default));
+
+    // Anything that starts inside the settings block swallows the next click
+    // on the screen. Without this, letting go of the slider resumes the game:
+    // the pointer goes down on the slider and up somewhere else, and the
+    // resulting `click` is delivered to their common ancestor — the pause
+    // screen, whose job is to resume on any click.
+    this.el('pause-settings').addEventListener('pointerdown', () => {
+      this._settingsInteraction = true;
+    });
+  }
+
   showPause(visible, onResume) {
     const screen = this.el('pause-screen');
     screen.classList.toggle('hidden', !visible);
+    this._settingsInteraction = false;
 
     // Not a one-shot listener: browsers impose a brief cooldown on
     // re-requesting pointer lock right after an Escape-driven unlock, so
@@ -611,7 +657,20 @@ export class HUD {
       this._pauseResumeHandler = null;
     }
     if (visible && onResume) {
-      this._pauseResumeHandler = () => onResume();
+      this._pauseResumeHandler = (e) => {
+        // Clicks on the controls themselves, and the click that ends a drag
+        // begun on one, adjust settings rather than resuming.
+        //
+        // The flag is cleared on every click, including the ones that land on
+        // the controls. Clearing it only on the swallowed-drag path leaves it
+        // set after an ordinary click on the slider or the reset button, and
+        // the next click — the one meant to resume — is eaten instead.
+        const onControls = e.target.closest('#pause-settings');
+        const endedDrag = this._settingsInteraction;
+        this._settingsInteraction = false;
+        if (onControls || endedDrag) return;
+        onResume();
+      };
       screen.addEventListener('click', this._pauseResumeHandler);
     }
   }
